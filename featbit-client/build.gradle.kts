@@ -29,6 +29,16 @@ android {
         jvmTarget = "11"
     }
 
+    testOptions {
+        unitTests.all {
+            // Surface Testcontainers' Docker-environment diagnostics during E2E runs.
+            it.systemProperty("org.slf4j.simpleLogger.log.org.testcontainers", "debug")
+            // docker-java defaults to API 1.32, which modern Docker daemons (>=25, min API
+            // 1.44) reject. It reads the negotiated version from this system property.
+            it.systemProperty("api.version", System.getProperty("api.version", "1.44"))
+        }
+    }
+
     publishing {
         singleVariant("release") {
             withSourcesJar()
@@ -46,4 +56,6 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.turbine)
+    testImplementation(libs.testcontainers)
+    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.13")
 }
