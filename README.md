@@ -202,7 +202,15 @@ separate job on every PR.
 - Android `minSdk 21`+, `compileSdk 34`.
 - Kotlin 1.9+, JVM target 11.
 
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md). To report a security
+issue, see [SECURITY.md](./SECURITY.md).
+
 ## License
 
-Apache-2.0 — see [LICENSE](./LICENSE). FeatBit and the FeatBit SDKs are trademarks/works of
-the FeatBit project; this is an independent community port of their .NET client SDK.
+Apache-2.0 — see [LICENSE](./LICENSE) and [NOTICE](./NOTICE). FeatBit and the FeatBit SDKs are
+works of the FeatBit project; this is an independent derivative port of their .NET client SDK
+and is not affiliated with or endorsed by FeatBit.
+
+Maintained by [Fluent Health](https://github.com/Fluent-Health).
