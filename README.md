@@ -180,6 +180,23 @@ gradle wrapper --gradle-version 8.9
 ./gradlew :featbit-client:test              # run unit tests
 ```
 
+## End-to-end tests
+
+A full-stack E2E (`featbit-client/src/test/kotlin/co/featbit/client/e2e/`) drives a real
+`FBClient` against a **real FeatBit stack** (Postgres + api-server + evaluation-server) started
+with Testcontainers. It seeds a flag via FeatBit's management API, then asserts the SDK
+evaluates it, observes a server-side toggle via polling, and re-identifies — over real HTTP.
+
+It is **gated by `FEATBIT_E2E=1`** so the default unit-test run never requires Docker:
+
+```bash
+FEATBIT_E2E=1 ./gradlew :featbit-client:testDebugUnitTest --tests "co.featbit.client.e2e.*"
+```
+
+Requirements: a reachable Docker daemon. FeatBit's Postgres schema is vendored under
+`src/test/resources/e2e/initdb/` (Apache-2.0, from `featbit/featbit`). CI runs this as a
+separate job on every PR.
+
 ## Supported versions
 
 - Android `minSdk 21`+, `compileSdk 34`.
