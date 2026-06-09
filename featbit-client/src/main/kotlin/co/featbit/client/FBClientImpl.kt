@@ -5,6 +5,7 @@ import co.featbit.client.changetracker.FlagTrackerImpl
 import co.featbit.client.datasynchronizer.DataSynchronizer
 import co.featbit.client.datasynchronizer.NullDataSynchronizer
 import co.featbit.client.datasynchronizer.PollingDataSynchronizer
+import co.featbit.client.datasynchronizer.StreamingDataSynchronizer
 import co.featbit.client.evaluation.EvalDetail
 import co.featbit.client.evaluation.Evaluator
 import co.featbit.client.evaluation.ValueConverter
@@ -65,6 +66,8 @@ public class FBClientImpl(
 
     private fun newDataSynchronizer(forUser: FBUser): DataSynchronizer = when {
         options.offline -> NullDataSynchronizer()
+        options.dataSyncMode == DataSyncMode.Streaming ->
+            StreamingDataSynchronizer(options, forUser, store)
         options.dataSyncMode == DataSyncMode.Polling ->
             PollingDataSynchronizer(options, forUser, store)
         else -> NullDataSynchronizer()

@@ -3,9 +3,10 @@
 ## Introduction
 
 This is a Kotlin/Android client-side SDK for the 100% open-source feature flags management
-platform [FeatBit](https://github.com/featbit/featbit). It is a port of the official
-[.NET Client-Side SDK](https://github.com/featbit/featbit-dotnet-client-sdk), built because
-FeatBit does not currently ship a native Kotlin SDK.
+platform [FeatBit](https://github.com/featbit/featbit), built because FeatBit does not
+currently ship a native Kotlin SDK. Its architecture and API are based on the official
+[.NET Client-Side SDK](https://github.com/featbit/featbit-dotnet-client-sdk); real-time
+streaming sync is modeled on FeatBit's JS/React-Native SDK and `/streaming` wire protocol.
 
 Be aware, this is a **client-side** SDK intended for use in a single-user context — mobile,
 desktop, or embedded applications. It is **not** intended for multi-user systems such as web
@@ -106,9 +107,22 @@ This SDK aligns with the FeatBit JS/React-Native SDK model (a promise-like
 
 ### Data synchronization
 
-The SDK currently synchronizes via **polling** (matching the .NET client SDK). Set the
-polling interval via `FBOptions.Builder.polling(uri, interval)`. WebSocket **streaming**
-sync (as used by the JS/RN SDK) is a planned future addition.
+The SDK supports two modes:
+
+- **Polling** (default) — fetches flags over HTTP at an interval (ported from the .NET client SDK):
+  ```kotlin
+  FBOptions.Builder(secret).polling("https://app-eval.featbit.co", interval = 5.minutes)
+  ```
+- **Streaming** — keeps a WebSocket open and receives flag changes in real time (modeled on the
+  JS/RN SDK and FeatBit's `/streaming` protocol):
+  ```kotlin
+  FBOptions.Builder(secret).streaming("wss://app-eval.featbit.co")
+  ```
+
+Both feed the same in-memory store, so evaluation, `FlagTracker`, and `flagChanges` behave
+identically regardless of mode. On Android, prefer **streaming while the app is foregrounded**
+and reconnect on resume/network-available; the synchronizer already retries with exponential
+backoff and an application-level heartbeat.
 
 ### FBClient
 
