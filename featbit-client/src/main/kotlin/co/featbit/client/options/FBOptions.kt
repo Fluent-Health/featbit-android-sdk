@@ -22,6 +22,8 @@ public class FBOptions internal constructor(
     public val pollingUri: String,
     /** The interval between polls. */
     public val pollingInterval: Duration,
+    /** The base WebSocket URL of the streaming (evaluation) service, e.g. `wss://app-eval.featbit.co`. */
+    public val streamingUri: String,
     /** The base URL of the event (insight) service, e.g. `https://app-eval.featbit.co`. */
     public val eventUri: String,
     /** The logger used by the SDK. */
@@ -39,6 +41,7 @@ public class FBOptions internal constructor(
         private var dataSyncMode: DataSyncMode = DataSyncMode.Polling
         private var pollingUri: String = DEFAULT_URI
         private var pollingInterval: Duration = DEFAULT_POLLING_INTERVAL
+        private var streamingUri: String = DEFAULT_STREAMING_URI
         private var eventUri: String = DEFAULT_URI
         private var logger: FBLogger = DefaultLogger()
 
@@ -47,6 +50,15 @@ public class FBOptions internal constructor(
             dataSyncMode = DataSyncMode.Polling
             this.pollingUri = pollingUri
             if (interval != null) pollingInterval = interval
+        }
+
+        /**
+         * Configures real-time streaming synchronization against [streamingUri]
+         * (a `ws://` or `wss://` URL, e.g. `wss://app-eval.featbit.co`).
+         */
+        public fun streaming(streamingUri: String): Builder = apply {
+            dataSyncMode = DataSyncMode.Streaming
+            this.streamingUri = streamingUri
         }
 
         /** Sets the base URL of the event (insight) service. */
@@ -70,12 +82,14 @@ public class FBOptions internal constructor(
             dataSyncMode = dataSyncMode,
             pollingUri = pollingUri,
             pollingInterval = pollingInterval,
+            streamingUri = streamingUri,
             eventUri = eventUri,
             logger = logger,
         )
 
         public companion object {
             private const val DEFAULT_URI: String = "http://localhost:5100"
+            private const val DEFAULT_STREAMING_URI: String = "ws://localhost:5100"
             private val DEFAULT_POLLING_INTERVAL: Duration = 5.minutes
         }
     }

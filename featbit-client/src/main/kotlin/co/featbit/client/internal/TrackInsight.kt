@@ -2,6 +2,7 @@ package co.featbit.client.internal
 
 import co.featbit.client.model.Insight
 import co.featbit.client.options.FBOptions
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.builtins.ListSerializer
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -37,6 +38,8 @@ internal class HttpTrackInsight(
                 .encodeToString(ListSerializer(Insight.serializer()), listOf(insight))
                 .encodeToByteArray()
             post(endpoint, payload)
+        } catch (ce: CancellationException) {
+            throw ce
         } catch (ex: Exception) {
             logger.error("Exception occurred while tracking insight.", ex)
         }
