@@ -1,0 +1,57 @@
+name: CI
+
+# PR-only validation pipeline (modeled on the Fluent-Health gravitee-policy-token-exchange
+# guide, adapted from Maven to this Gradle/Android build). Release automation is intentionally
+# out of scope here — the guide keeps that in a separate release.yml triggered on
+# `release: published`, which we omit by request ("PRs only").
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs when a PR is updated.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+          cache: gradle
+
+      - name: Unit tests
+        run: ./gradlew :featbit-client:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Assemble library AAR + example app
+        run: ./gradlew :featbit-client:assembleRelease :example-app:assembleDebug --no-daemon --stacktrace
+
+      - name: Upload library AAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: featbit-client-aar
+          path: featbit-client/build/outputs/aar/*.aar
+          retention-days: 7
+
+      - name: Upload unit test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: featbit-client/build/reports/tests/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # TODO (follow-up, requires Docker): a full-stack E2E job against a real FeatBit stack via
+  # Testcontainers — the analogue of the guide's `mvn verify` integration step. ubuntu-latest
+  # provides Docker, so it will run here as a separate job gated by FEATBIT_E2E=1 once the
+  # E2E suite lands.
