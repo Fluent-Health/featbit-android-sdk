@@ -1,0 +1,17 @@
+FeatBit Client-Side SDK for Kotlin (Android)
+Copyright 2026 Fluent Health
+
+Licensed under the Apache License, Version 2.0 (the "License");
+see the LICENSE file for the full terms.
+
+This product is an independent derivative work of the FeatBit .NET Client-Side SDK
+(https://github.com/featbit/featbit-dotnet-client-sdk), Copyright FeatBit, licensed
+under the Apache License, Version 2.0.
+
+"FeatBit" is a project/name of the FeatBit authors and is referenced here only to
+describe interoperability. This project is not affiliated with or endorsed by FeatBit.
+
+The PostgreSQL schema vendored under
+featbit-client/src/test/resources/e2e/initdb/ is taken from the FeatBit project
+(https://github.com/featbit/featbit), Copyright FeatBit, Apache License, Version 2.0,
+and is used solely to provision a real FeatBit server for end-to-end tests.

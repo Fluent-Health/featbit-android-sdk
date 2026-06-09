@@ -1,9 +1,7 @@
 name: CI
 
-# PR-only validation pipeline (modeled on the Fluent-Health gravitee-policy-token-exchange
-# guide, adapted from Maven to this Gradle/Android build). Release automation is intentionally
-# out of scope here — the guide keeps that in a separate release.yml triggered on
-# `release: published`, which we omit by request ("PRs only").
+# PR-only validation pipeline for this Gradle/Android build. Release automation is
+# intentionally out of scope here (no release workflow): this runs on pull requests only.
 on:
   pull_request:
 
@@ -65,8 +63,7 @@ jobs:
           cache: gradle
 
       # Full-stack E2E: a real FBClient driven against a real FeatBit stack (Postgres +
-      # api-server + evaluation-server) started by Testcontainers — the analogue of the
-      # gravitee guide's `mvn verify` integration step. ubuntu-latest provides Docker.
+      # api-server + evaluation-server) started by Testcontainers. ubuntu-latest provides Docker.
       - name: Full-stack E2E
         env:
           FEATBIT_E2E: "1"
