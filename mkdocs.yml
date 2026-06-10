@@ -1,0 +1,12 @@
+site_name: FeatBit Kotlin/Android SDK
+site_description: FeatBit client-side feature-flag SDK for Kotlin/Android
+repo_url: https://github.com/Fluent-Health/featbit-android-sdk
+edit_uri: edit/main/docs/
+
+nav:
+  - Home: index.md
+  - Usage: usage.md
+  - Data synchronization: data-sync.md
+
+plugins:
+  - techdocs-core
