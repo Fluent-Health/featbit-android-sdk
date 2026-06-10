@@ -239,6 +239,11 @@ separate job on every PR.
 - Android `minSdk 21`+, `compileSdk 34`.
 - Kotlin 1.9+, JVM target 11.
 
+## Backstage
+
+This repository is [Backstage](https://backstage.io)-compatible: `catalog-info.yaml` registers
+it as a Component, and this documentation is published via **TechDocs** (`mkdocs.yml` + `docs/`).
+
 ## Contributing
 
 Contributions are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md). To report a security
