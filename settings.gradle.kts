@@ -17,4 +17,5 @@ dependencyResolutionManagement {
 rootProject.name = "featbit-kotlin-sdk"
 
 include(":featbit-client")
+include(":featbit-client-android")
 include(":example-app")

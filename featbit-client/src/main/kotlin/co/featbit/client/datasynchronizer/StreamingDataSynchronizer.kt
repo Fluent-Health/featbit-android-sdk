@@ -64,6 +64,9 @@ internal class StreamingDataSynchronizer(
     private var closed = false
 
     @Volatile
+    private var paused = false
+
+    @Volatile
     private var webSocket: WebSocket? = null
     private var heartbeatJob: Job? = null
     private var reconnectAttempts = 0
@@ -76,7 +79,7 @@ internal class StreamingDataSynchronizer(
     }
 
     private fun connect() {
-        if (closed) return
+        if (closed || paused) return
         val url = streamingEndpoint.newBuilder()
             .addQueryParameter("type", "client")
             .addQueryParameter("version", "2")
@@ -146,8 +149,26 @@ internal class StreamingDataSynchronizer(
         }
     }
 
+    override fun pause() {
+        if (closed || paused) return
+        paused = true
+        reconnecting.set(false)
+        heartbeatJob?.cancel()
+        webSocket?.close(NORMAL_CLOSURE, "paused")
+        webSocket = null
+        logger.debug { "Streaming paused." }
+    }
+
+    override fun resume() {
+        if (closed || !paused) return
+        paused = false
+        reconnectAttempts = 0
+        logger.debug { "Streaming resumed; reconnecting and resyncing." }
+        connect()
+    }
+
     private fun scheduleReconnect(reason: String) {
-        if (closed) return
+        if (closed || paused) return
         heartbeatJob?.cancel()
         if (!reconnecting.compareAndSet(false, true)) return
 

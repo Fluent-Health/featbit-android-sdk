@@ -60,6 +60,9 @@ public class FBClientImpl(
     @Volatile
     private var dataSynchronizer: DataSynchronizer = newDataSynchronizer(initialUser)
 
+    private val lifecycle =
+        LifecycleController(scope, options.backgroundGracePeriod.inWholeMilliseconds) { dataSynchronizer }
+
     override val initialized: Boolean get() = dataSynchronizer.initialized
 
     override val flagTracker: FlagTracker get() = flagTrackerImpl
@@ -133,6 +136,10 @@ public class FBClientImpl(
         evaluateCore(key, default, ValueConverters.string)
 
     override fun allFlags(): Map<String, FeatureFlag> = store.getAll().associateBy { it.id }
+
+    override fun setForeground(foreground: Boolean) = lifecycle.onForegroundChanged(foreground)
+
+    override fun setNetworkAvailable(available: Boolean) = lifecycle.onNetworkChanged(available)
 
     private fun <T> evaluateCore(
         key: String,

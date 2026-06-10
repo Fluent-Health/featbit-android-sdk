@@ -15,4 +15,16 @@ internal interface DataSynchronizer : Closeable {
      * @return `true` once initialized; `false` if a fatal error stopped synchronization.
      */
     suspend fun start(): Boolean
+
+    /**
+     * Temporarily stops network activity (e.g. app backgrounded or offline) while preserving
+     * already-synced data. Safe to call repeatedly. Default: no-op.
+     */
+    fun pause() {}
+
+    /**
+     * Resumes synchronization after a [pause] and forces an immediate resync. Safe to call
+     * repeatedly. Default: no-op.
+     */
+    fun resume() {}
 }
