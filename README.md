@@ -239,6 +239,17 @@ separate job on every PR.
 - Android `minSdk 21`+, `compileSdk 34`.
 - Kotlin 1.9+, JVM target 11.
 
+## Backstage
+
+This repository is [Backstage](https://backstage.io)-compatible: `catalog-info.yaml` registers
+it as a Component, and this documentation is published via **TechDocs** (`mkdocs.yml` + `docs/`).
+
+> `catalog-info.yaml` encodes organization-specific Backstage conventions — the `owner`,
+> custom annotations, and the assumption that the descriptor is registered in an org root
+> catalog. **Adapt or remove these to match your own Backstage instance** (or drop
+> `catalog-info.yaml`/`mkdocs.yml` entirely if you don't use Backstage) — just as you supply
+> your own FeatBit environment secret and evaluation-server URLs.
+
 ## Contributing
 
 Contributions are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md). To report a security
