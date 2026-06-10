@@ -8,6 +8,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.AfterClass
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assume
 import org.junit.Before
@@ -39,6 +40,7 @@ class FeatBitStreamingE2ETest {
         val options = FBOptions.Builder(seed.clientSecret)
             .streaming(streamingUrl)
             .event(seed.evaluationBaseUrl)
+            .backgroundGracePeriod(1.seconds) // short grace so the test runs fast
             .build()
 
         val client = FBClientImpl(options, FBUser.builder("e2e-stream-user").name("stream").build())
@@ -60,6 +62,20 @@ class FeatBitStreamingE2ETest {
             assertTrue("streaming SDK should receive the server-side change", flipped)
             assertTrue("a flag-change event should have fired", changes.isNotEmpty())
             assertEquals("false", changes.last().newValue)
+
+            // --- lifecycle pause/resume: background, change server-side, then foreground ---
+            client.setForeground(false)
+            delay(1_500) // exceed the 1s grace so the stream pauses
+            stack.toggleFlag(enabled = true)
+
+            // While paused, the SDK must NOT receive the change.
+            val sawWhilePaused = awaitUntil(3.seconds) { client.boolVariation(seed.flagKey, default = false) }
+            assertFalse("paused streaming must not receive updates", sawWhilePaused)
+
+            // On foreground, it reconnects and resyncs.
+            client.setForeground(true)
+            val resynced = awaitUntil(15.seconds) { client.boolVariation(seed.flagKey, default = false) }
+            assertTrue("resuming should reconnect and resync the flag", resynced)
         } finally {
             client.close()
         }

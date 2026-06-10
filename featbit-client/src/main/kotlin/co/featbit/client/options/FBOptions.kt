@@ -5,6 +5,7 @@ import co.featbit.client.FBLogger
 import co.featbit.client.model.FeatureFlag
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Configuration for an [co.featbit.client.FBClient]. Build instances with [Builder].
@@ -26,6 +27,11 @@ public class FBOptions internal constructor(
     public val streamingUri: String,
     /** The base URL of the event (insight) service, e.g. `https://app-eval.featbit.co`. */
     public val eventUri: String,
+    /**
+     * How long to wait after the app backgrounds or goes offline before pausing streaming, to
+     * debounce brief app-switches and network blips. Only relevant when lifecycle hooks are used.
+     */
+    public val backgroundGracePeriod: Duration,
     /** The logger used by the SDK. */
     public val logger: FBLogger,
 ) {
@@ -43,6 +49,7 @@ public class FBOptions internal constructor(
         private var pollingInterval: Duration = DEFAULT_POLLING_INTERVAL
         private var streamingUri: String = DEFAULT_STREAMING_URI
         private var eventUri: String = DEFAULT_URI
+        private var backgroundGracePeriod: Duration = DEFAULT_BACKGROUND_GRACE
         private var logger: FBLogger = DefaultLogger()
 
         /** Configures polling synchronization against [pollingUri] at an optional [interval]. */
@@ -72,6 +79,11 @@ public class FBOptions internal constructor(
             this.bootstrap = bootstrap
         }
 
+        /** Sets the debounce delay before streaming pauses on background/offline (default 20s). */
+        public fun backgroundGracePeriod(period: Duration): Builder = apply {
+            this.backgroundGracePeriod = period
+        }
+
         /** Sets the logger used by the SDK. Defaults to a [DefaultLogger]. */
         public fun logger(logger: FBLogger): Builder = apply { this.logger = logger }
 
@@ -84,6 +96,7 @@ public class FBOptions internal constructor(
             pollingInterval = pollingInterval,
             streamingUri = streamingUri,
             eventUri = eventUri,
+            backgroundGracePeriod = backgroundGracePeriod,
             logger = logger,
         )
 
@@ -91,6 +104,7 @@ public class FBOptions internal constructor(
             private const val DEFAULT_URI: String = "http://localhost:5100"
             private const val DEFAULT_STREAMING_URI: String = "ws://localhost:5100"
             private val DEFAULT_POLLING_INTERVAL: Duration = 5.minutes
+            private val DEFAULT_BACKGROUND_GRACE: Duration = 20.seconds
         }
     }
 }

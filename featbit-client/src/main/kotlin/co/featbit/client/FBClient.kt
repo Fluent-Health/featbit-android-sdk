@@ -54,4 +54,21 @@ public interface FBClient : Closeable {
 
     /** Returns a snapshot map of all known feature flags keyed by their flag key. */
     public fun allFlags(): Map<String, FeatureFlag>
+
+    /**
+     * Notifies the SDK whether the app is in the foreground. In streaming mode the connection is
+     * dropped shortly after backgrounding and re-established (with an immediate resync) on
+     * foreground. Defaults to foreground if never called.
+     *
+     * Wire this from your app's lifecycle, or use the `FBLifecycleConnector` from the
+     * `featbit-client-android` module to do it automatically.
+     */
+    public fun setForeground(foreground: Boolean)
+
+    /**
+     * Notifies the SDK whether the network is available. In streaming mode the connection is
+     * suspended while offline and re-established immediately when connectivity returns. Defaults
+     * to available if never called.
+     */
+    public fun setNetworkAvailable(available: Boolean)
 }

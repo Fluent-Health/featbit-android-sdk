@@ -120,9 +120,32 @@ The SDK supports two modes:
   ```
 
 Both feed the same in-memory store, so evaluation, `FlagTracker`, and `flagChanges` behave
-identically regardless of mode. On Android, prefer **streaming while the app is foregrounded**
-and reconnect on resume/network-available; the synchronizer already retries with exponential
-backoff and an application-level heartbeat.
+identically regardless of mode. The synchronizer retries with exponential backoff and an
+application-level heartbeat.
+
+### Lifecycle-aware streaming (Android)
+
+WebSockets don't survive backgrounding/doze, and reconnecting blindly wastes battery. The SDK
+exposes neutral hooks so a streaming connection is dropped when the app backgrounds or goes
+offline and re-established (with an immediate resync) on foreground / reconnect:
+
+```kotlin
+client.setForeground(true /* or false */)
+client.setNetworkAvailable(true /* or false */)
+```
+
+Transitions to inactive are debounced by `FBOptions.Builder.backgroundGracePeriod(...)`
+(default 20s) so brief app-switches/blips don't churn. Defaults are foreground + online, so a
+client whose hooks are never called streams as before.
+
+For Android, the optional **`featbit-client-android`** artifact wires these hooks to
+`ProcessLifecycleOwner` + `ConnectivityManager` automatically — the core gains no extra
+dependency:
+
+```kotlin
+// e.g. in Application.onCreate(), on the main thread
+FBLifecycleConnector(this, fbClient).start()
+```
 
 ### FBClient
 
