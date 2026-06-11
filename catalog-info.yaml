@@ -7,7 +7,7 @@ metadata:
     github.com/project-slug: Fluent-Health/featbit-android-sdk
     backstage.io/techdocs-ref: dir:.
     # OSS lifecycle tracking: set to "published" once the repository is made public.
-    fluentinhealth.com/oss: pending
+    fluentinhealth.com/oss: published
     fluentinhealth.com/service-assessment: |-
       security:
         - type: auth
