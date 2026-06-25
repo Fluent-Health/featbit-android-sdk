@@ -1,4 +1,4 @@
-package co.featbit.client.datasynchronizer
+package co.featbit.client.data.sync
 
 /** A no-op synchronizer used in offline mode; always reports as initialized. */
 internal class NullDataSynchronizer : DataSynchronizer {

@@ -1,4 +1,4 @@
-package co.featbit.client.datasynchronizer
+package co.featbit.client.data.sync
 
 import co.featbit.client.model.FBUser
 import co.featbit.client.model.FeatureFlag

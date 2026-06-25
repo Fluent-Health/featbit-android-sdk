@@ -4,10 +4,10 @@ import co.featbit.client.app.DefaultMemoryStore
 import co.featbit.client.app.FlagTrackerImpl
 import co.featbit.client.app.LifecycleController
 import co.featbit.client.changetracker.FlagTracker
-import co.featbit.client.datasynchronizer.DataSynchronizer
-import co.featbit.client.datasynchronizer.NullDataSynchronizer
-import co.featbit.client.datasynchronizer.PollingDataSynchronizer
-import co.featbit.client.datasynchronizer.StreamingDataSynchronizer
+import co.featbit.client.data.sync.DataSynchronizer
+import co.featbit.client.data.sync.NullDataSynchronizer
+import co.featbit.client.data.sync.PollingDataSynchronizer
+import co.featbit.client.data.sync.StreamingDataSynchronizer
 import co.featbit.client.domain.EvalResult
 import co.featbit.client.domain.Evaluator
 import co.featbit.client.domain.MemoryStore

@@ -1,6 +1,6 @@
 package co.featbit.client.app
 
-import co.featbit.client.datasynchronizer.DataSynchronizer
+import co.featbit.client.data.sync.DataSynchronizer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
