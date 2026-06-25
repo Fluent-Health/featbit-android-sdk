@@ -1,4 +1,4 @@
-package co.featbit.client.evaluation
+package co.featbit.client.domain
 
 import co.featbit.client.store.MemoryStore
 

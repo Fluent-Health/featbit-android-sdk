@@ -1,4 +1,4 @@
-package co.featbit.client.evaluation
+package co.featbit.client.domain
 
 /**
  * Converts the string variation value stored for a flag into a typed value.

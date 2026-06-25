@@ -6,11 +6,11 @@ import co.featbit.client.datasynchronizer.DataSynchronizer
 import co.featbit.client.datasynchronizer.NullDataSynchronizer
 import co.featbit.client.datasynchronizer.PollingDataSynchronizer
 import co.featbit.client.datasynchronizer.StreamingDataSynchronizer
+import co.featbit.client.domain.EvalResult
+import co.featbit.client.domain.Evaluator
+import co.featbit.client.domain.ValueConverter
+import co.featbit.client.domain.ValueConverters
 import co.featbit.client.evaluation.EvalDetail
-import co.featbit.client.evaluation.EvalResult
-import co.featbit.client.evaluation.Evaluator
-import co.featbit.client.evaluation.ValueConverter
-import co.featbit.client.evaluation.ValueConverters
 import co.featbit.client.internal.FBEndpoints
 import co.featbit.client.internal.HttpTrackInsight
 import co.featbit.client.internal.InsightDispatcher

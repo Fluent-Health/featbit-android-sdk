@@ -1,4 +1,4 @@
-package co.featbit.client.evaluation
+package co.featbit.client.domain
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
