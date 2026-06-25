@@ -1,4 +1,4 @@
-package co.featbit.client.internal
+package co.featbit.client.data.http
 
 import co.featbit.client.model.EndUser
 import co.featbit.client.model.FBUser

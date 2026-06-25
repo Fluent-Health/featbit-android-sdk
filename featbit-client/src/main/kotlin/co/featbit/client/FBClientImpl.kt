@@ -14,7 +14,7 @@ import co.featbit.client.domain.MemoryStore
 import co.featbit.client.domain.ValueConverter
 import co.featbit.client.domain.ValueConverters
 import co.featbit.client.evaluation.EvalDetail
-import co.featbit.client.internal.FBEndpoints
+import co.featbit.client.data.http.FBEndpoints
 import co.featbit.client.internal.HttpTrackInsight
 import co.featbit.client.internal.InsightDispatcher
 import co.featbit.client.internal.NoopTrackInsight

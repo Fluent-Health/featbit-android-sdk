@@ -1,4 +1,4 @@
-package co.featbit.client.internal
+package co.featbit.client.data.http
 
 /**
  * Builds the short-lived connection token FeatBit's streaming endpoint expects on the

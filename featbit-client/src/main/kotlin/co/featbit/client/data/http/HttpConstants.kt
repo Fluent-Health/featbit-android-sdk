@@ -1,4 +1,4 @@
-package co.featbit.client.internal
+package co.featbit.client.data.http
 
 internal object HttpConstants {
     const val USER_AGENT: String = "featbit-kotlin-client-sdk"

@@ -1,4 +1,4 @@
-package co.featbit.client.internal
+package co.featbit.client.data.http
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

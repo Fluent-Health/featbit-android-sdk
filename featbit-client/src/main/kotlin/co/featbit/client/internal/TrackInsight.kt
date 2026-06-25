@@ -1,5 +1,7 @@
 package co.featbit.client.internal
 
+import co.featbit.client.data.http.FBEndpoints
+import co.featbit.client.data.http.FbApiClient
 import co.featbit.client.model.Insight
 import co.featbit.client.options.FBOptions
 import kotlinx.coroutines.CancellationException

@@ -1,4 +1,4 @@
-package co.featbit.client.internal
+package co.featbit.client.data.http
 
 import co.featbit.client.options.FBOptions
 import org.junit.Assert.assertEquals

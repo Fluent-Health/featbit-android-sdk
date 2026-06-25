@@ -1,7 +1,7 @@
 package co.featbit.client.data.sync
 
-import co.featbit.client.internal.FBEndpoints
-import co.featbit.client.internal.GetUserFlags
+import co.featbit.client.data.http.FBEndpoints
+import co.featbit.client.data.http.GetUserFlags
 import co.featbit.client.model.FBUser
 import co.featbit.client.options.FBOptions
 import co.featbit.client.domain.MemoryStore
