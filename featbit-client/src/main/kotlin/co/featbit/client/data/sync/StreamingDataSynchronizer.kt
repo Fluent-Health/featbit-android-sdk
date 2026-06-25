@@ -2,7 +2,7 @@ package co.featbit.client.data.sync
 
 import co.featbit.client.data.http.ConnectionToken
 import co.featbit.client.data.http.FBEndpoints
-import co.featbit.client.model.EndUser
+import co.featbit.client.wire.EndUser
 import co.featbit.client.model.FBUser
 import co.featbit.client.model.FeatureFlag
 import co.featbit.client.options.FBOptions

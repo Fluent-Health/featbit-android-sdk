@@ -1,5 +1,7 @@
-package co.featbit.client.model
+package co.featbit.client.wire
 
+import co.featbit.client.model.FBUser
+import co.featbit.client.model.FeatureFlag
 import kotlinx.serialization.Serializable
 
 /**

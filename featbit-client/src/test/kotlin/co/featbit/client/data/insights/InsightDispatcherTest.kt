@@ -3,7 +3,7 @@ package co.featbit.client.data.insights
 import co.featbit.client.FBLogger
 import co.featbit.client.model.FBUser
 import co.featbit.client.model.FeatureFlag
-import co.featbit.client.model.Insight
+import co.featbit.client.wire.Insight
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel

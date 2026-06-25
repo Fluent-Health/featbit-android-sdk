@@ -1,6 +1,7 @@
 package co.featbit.client.model
 
 import co.featbit.client.options.DataSyncMode
+import co.featbit.client.wire.CustomizedProperty
 import co.featbit.client.options.FBOptions
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

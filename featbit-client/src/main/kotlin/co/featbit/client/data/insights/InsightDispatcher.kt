@@ -1,7 +1,7 @@
 package co.featbit.client.data.insights
 
 import co.featbit.client.FBLogger
-import co.featbit.client.model.Insight
+import co.featbit.client.wire.Insight
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow

@@ -2,7 +2,7 @@ package co.featbit.client.data.insights
 
 import co.featbit.client.data.http.FBEndpoints
 import co.featbit.client.data.http.FbApiClient
-import co.featbit.client.model.Insight
+import co.featbit.client.wire.Insight
 import co.featbit.client.options.FBOptions
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.builtins.ListSerializer

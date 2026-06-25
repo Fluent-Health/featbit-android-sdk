@@ -21,7 +21,7 @@ import co.featbit.client.data.insights.NoopTrackInsight
 import co.featbit.client.data.insights.TrackInsight
 import co.featbit.client.model.FBUser
 import co.featbit.client.model.FeatureFlag
-import co.featbit.client.model.Insight
+import co.featbit.client.wire.Insight
 import co.featbit.client.options.DataSyncMode
 import co.featbit.client.options.FBOptions
 import kotlinx.coroutines.CoroutineExceptionHandler

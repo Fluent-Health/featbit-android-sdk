@@ -1,5 +1,8 @@
 package co.featbit.client.model
 
+import co.featbit.client.wire.CustomizedProperty
+import co.featbit.client.wire.EndUser
+
 /**
  * Defines the attributes of a user for whom feature flags are evaluated.
  *

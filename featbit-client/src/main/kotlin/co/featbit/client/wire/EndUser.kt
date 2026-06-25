@@ -1,4 +1,4 @@
-package co.featbit.client.model
+package co.featbit.client.wire
 
 import kotlinx.serialization.Serializable
 
