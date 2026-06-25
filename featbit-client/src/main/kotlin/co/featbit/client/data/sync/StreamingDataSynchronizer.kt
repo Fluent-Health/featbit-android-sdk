@@ -144,11 +144,18 @@ internal class StreamingDataSynchronizer(
 
     private fun handleMessage(text: String) {
         try {
+            // Two-pass decode (envelope → DataSyncPayload) is structurally needed because the
+            // server multiplexes message types over the same socket (data-sync, ping, ...).
+            // The second `decodeFromJsonElement` walks the AST a second time only when the
+            // envelope actually carries data; ping/other types early-return before that cost.
+            // A custom polymorphic serializer could collapse it to one pass — deferred until
+            // streaming payloads dominate a profile.
             val envelope = StreamingJson.decodeFromString(ServerEnvelope.serializer(), text)
             if (envelope.messageType != "data-sync" || envelope.data == null) return
 
             val payload = StreamingJson.decodeFromJsonElement(DataSyncPayload.serializer(), envelope.data)
-            payload.featureFlags.forEach(store::upsert)
+            // Bulk variant: one write-monitor enter for the whole batch instead of one per flag.
+            store.upsertAll(payload.featureFlags)
             timestamp = System.currentTimeMillis()
 
             if (initializedFlag.compareAndSet(false, true)) {

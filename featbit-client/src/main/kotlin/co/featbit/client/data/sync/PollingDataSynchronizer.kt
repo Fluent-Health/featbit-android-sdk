@@ -80,7 +80,9 @@ internal class PollingDataSynchronizer(
             timestamp = System.currentTimeMillis()
             logger.debug { "Polling received ${response.flags.size} flags." }
 
-            response.flags.forEach { store.upsert(it) }
+            // Bulk upsert: a 200-flag snapshot used to enter the store's write monitor 200x;
+            // upsertAll takes the lock once for the writes, then drains change events outside.
+            store.upsertAll(response.flags)
 
             if (initializedFlag.compareAndSet(false, true)) {
                 startTask.complete(true)

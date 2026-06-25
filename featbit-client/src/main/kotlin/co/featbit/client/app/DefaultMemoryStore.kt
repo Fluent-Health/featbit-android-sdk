@@ -32,20 +32,51 @@ public class DefaultMemoryStore(
 
     override fun upsert(flag: FeatureFlag) {
         val event: FlagValueChangedEvent? = synchronized(writeLock) {
-            val existing = items[flag.id]
-            val change = when {
-                existing == null -> FlagValueChangedEvent(flag.id, null, flag.variation)
-                existing.variation != flag.variation ->
-                    FlagValueChangedEvent(flag.id, existing.variation, flag.variation)
-                else -> null
-            }
-            items[flag.id] = flag
-            change
+            computeEventAndStore(flag)
         }
 
         if (event != null) {
             listeners.forEach { it.onChange(event) }
         }
+    }
+
+    /**
+     * Bulk upsert under a single monitor — used by the polling path which receives an N-flag
+     * snapshot per response. The pre-existing per-flag [upsert] enters the writeLock N times
+     * (N monitor enters + N exits); this variant enters once. Change events are still raised
+     * one-per-flag, *outside* the lock, so listener latency cannot stall the writer thread.
+     */
+    override fun upsertAll(flags: Collection<FeatureFlag>) {
+        if (flags.isEmpty()) return
+        // Collect events under the write lock so the "compute change event then store"
+        // sequence stays atomic per flag, matching single-upsert semantics.
+        val events: List<FlagValueChangedEvent> = synchronized(writeLock) {
+            val collected = ArrayList<FlagValueChangedEvent>(flags.size)
+            for (flag in flags) {
+                val event = computeEventAndStore(flag)
+                if (event != null) collected += event
+            }
+            collected
+        }
+
+        if (events.isEmpty() || listeners.isEmpty()) return
+        // forEach listener × forEach event would be O(L*E) monitor-light callbacks; we accept
+        // that cost rather than re-snapshotting listeners per event.
+        for (event in events) {
+            listeners.forEach { it.onChange(event) }
+        }
+    }
+
+    private fun computeEventAndStore(flag: FeatureFlag): FlagValueChangedEvent? {
+        val existing = items[flag.id]
+        val change = when {
+            existing == null -> FlagValueChangedEvent(flag.id, null, flag.variation)
+            existing.variation != flag.variation ->
+                FlagValueChangedEvent(flag.id, existing.variation, flag.variation)
+            else -> null
+        }
+        items[flag.id] = flag
+        return change
     }
 
     override fun addChangeListener(listener: FlagChangeListener) {

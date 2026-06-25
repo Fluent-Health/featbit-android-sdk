@@ -289,4 +289,192 @@ class DefaultMemoryStoreTest {
 
         assertEquals("listener fires exactly once despite two add calls", 1, count.get())
     }
+
+    // ---------------------------------------------------------------------------------------
+    // upsertAll tests (perf-pass: one lock acquire per batch instead of N)
+    // ---------------------------------------------------------------------------------------
+
+    /**
+     * Contract: `upsertAll(emptyCollection)` is a no-op. Polling can call this with an empty
+     * snapshot (server returns no flags); must not enter the write lock or fire any events.
+     *
+     * Mutation that would fail this:
+     *   * Removing the `if (flags.isEmpty()) return` short-circuit — the impl would still
+     *     enter the synchronized block (small but observable), but more importantly the
+     *     listener-fire loop would still iterate (zero events, technically still a pass).
+     *     This test pins the *event* side; lock-acquisition itself is not observable.
+     *   * If a future refactor accidentally fires a spurious empty-event, this catches it.
+     */
+    @Test
+    fun `upsertAll with empty collection fires no events`() {
+        val store = DefaultMemoryStore()
+        val events = CopyOnWriteArrayList<FlagValueChangedEvent>()
+        store.addChangeListener { events.add(it) }
+
+        store.upsertAll(emptyList())
+
+        assertTrue("empty bulk upsert fires zero events", events.isEmpty())
+    }
+
+    /**
+     * Contract: a bulk upsert of N new flags fires N change events, one per flag, each with
+     * `oldValue == null` and `newValue == flag.variation`. Output order = input order
+     * (preserved by ArrayList accumulation under the write lock).
+     *
+     * Mutation that would fail this:
+     *   * Replacing the inner loop with a single-event emit (e.g., notifying once at end with
+     *     just the last flag) — event count drops from N to 1.
+     *   * Filtering out flags that "look unchanged" relative to a sibling in the same batch —
+     *     would fire fewer events.
+     *   * Re-ordering the accumulator (e.g., HashSet instead of ArrayList) — event order
+     *     would scramble for some inputs.
+     */
+    @Test
+    fun `upsertAll of new flags fires one event per flag in input order`() {
+        val store = DefaultMemoryStore()
+        val events = CopyOnWriteArrayList<FlagValueChangedEvent>()
+        store.addChangeListener { events.add(it) }
+
+        store.upsertAll(listOf(flag("a", "1"), flag("b", "2"), flag("c", "3")))
+
+        assertEquals(
+            "events fire one-per-flag with null oldValue, in input order",
+            listOf(
+                FlagValueChangedEvent("a", null, "1"),
+                FlagValueChangedEvent("b", null, "2"),
+                FlagValueChangedEvent("c", null, "3"),
+            ),
+            events.toList(),
+        )
+    }
+
+    /**
+     * Contract: in a bulk upsert mixing changed + unchanged flags, only the changed flags
+     * fire events. This mirrors the per-flag `upsert` semantic exactly — bulk must NOT
+     * fire an event for a flag whose `variation` matches the existing entry.
+     *
+     * Mutation that would fail this:
+     *   * Bulk impl naively fires an event for every input (skipping the per-flag diff) —
+     *     `c` would produce an unwanted event.
+     *   * Diff comparing the wrong field (e.g., variationId instead of variation) — both `a`
+     *     (unchanged variation) and `c` (unchanged variation) would either appear or
+     *     disappear from events, depending on the bug.
+     */
+    @Test
+    fun `upsertAll mixing changed and unchanged flags fires events only for changes`() {
+        val store = DefaultMemoryStore(listOf(flag("a", "1"), flag("c", "3")))
+        val events = CopyOnWriteArrayList<FlagValueChangedEvent>()
+        store.addChangeListener { events.add(it) }
+
+        // a: unchanged. b: new. c: unchanged. d: new.
+        store.upsertAll(listOf(flag("a", "1"), flag("b", "2"), flag("c", "3"), flag("d", "4")))
+
+        assertEquals(
+            "only b (new) and d (new) fire — a and c are no-op for matching variation",
+            listOf(
+                FlagValueChangedEvent("b", null, "2"),
+                FlagValueChangedEvent("d", null, "4"),
+            ),
+            events.toList(),
+        )
+        // Store reflects every entry — even ones that produced no event.
+        assertEquals("1", store.get("a")?.variation)
+        assertEquals("2", store.get("b")?.variation)
+        assertEquals("3", store.get("c")?.variation)
+        assertEquals("4", store.get("d")?.variation)
+    }
+
+    /**
+     * Contract: when a bulk upsert overwrites existing entries with different variations,
+     * each event carries the correct (prior_variation, new_variation) pair. Pinning this
+     * separately from "new-flag events" because the diff path is harder to get right.
+     *
+     * Mutation that would fail this:
+     *   * Computing `oldValue` from the freshly-stored map (after the write) instead of the
+     *     pre-write read — every event would have `oldValue == newValue`.
+     *   * Storing the whole input list pre-loop and reading old values from there — would
+     *     skew on duplicate inputs.
+     */
+    @Test
+    fun `upsertAll overwriting existing flags carries correct oldValue per event`() {
+        val store = DefaultMemoryStore(listOf(flag("a", "old-a"), flag("b", "old-b")))
+        val events = CopyOnWriteArrayList<FlagValueChangedEvent>()
+        store.addChangeListener { events.add(it) }
+
+        store.upsertAll(listOf(flag("a", "new-a"), flag("b", "new-b")))
+
+        assertEquals(
+            listOf(
+                FlagValueChangedEvent("a", "old-a", "new-a"),
+                FlagValueChangedEvent("b", "old-b", "new-b"),
+            ),
+            events.toList(),
+        )
+    }
+
+    /**
+     * Contract: in `upsertAll`, listener callbacks fire AFTER all writes complete. A listener
+     * invoked during dispatch can call `store.get(otherKeyInTheSameBatch)` and observe the
+     * post-batch value, not a half-written intermediate state. This is the consistency
+     * guarantee documented in `MemoryStore.upsertAll`'s Kdoc.
+     *
+     * Mutation that would fail this:
+     *   * Re-implementing `upsertAll` as `flags.forEach { upsert(it) }` (the *interface
+     *     default*) — listeners fire interleaved with writes, so during the event for `a`,
+     *     `b` is not yet visible in the store, and the captured snapshot would show `null`
+     *     for `b`.
+     *
+     * Note: this is the documented behavioral DIFFERENCE between the override and the
+     * default, so future maintainers know which is which.
+     */
+    @Test
+    fun `upsertAll fires listeners after all writes — listener sees consistent snapshot`() {
+        val store = DefaultMemoryStore()
+        val observedDuringDispatch = CopyOnWriteArrayList<Pair<String, String?>>()
+        store.addChangeListener { ev ->
+            // Capture, for each event, what the store reports for the *other* flag in the
+            // batch. With the override (write-then-notify), every event must observe every
+            // sibling already in place.
+            observedDuringDispatch.add(ev.key to store.get(otherKey(ev.key))?.variation)
+        }
+
+        store.upsertAll(listOf(flag("a", "1"), flag("b", "2")))
+
+        // Both events must see both writes already committed. Note the snapshot map: for
+        // event-a, sibling "b" must already be in the store; for event-b, sibling "a" must
+        // be there too.
+        assertTrue(
+            "during event for 'a', sibling 'b' must already be visible (saw: $observedDuringDispatch)",
+            observedDuringDispatch.contains("a" to "2"),
+        )
+        assertTrue(
+            "during event for 'b', sibling 'a' must already be visible (saw: $observedDuringDispatch)",
+            observedDuringDispatch.contains("b" to "1"),
+        )
+    }
+
+    private fun otherKey(key: String): String = when (key) {
+        "a" -> "b"
+        "b" -> "a"
+        else -> throw IllegalArgumentException("unexpected key $key")
+    }
+
+    /**
+     * Contract: with zero registered listeners, `upsertAll` short-circuits the notify loop
+     * entirely. This pins the "no listeners → skip dispatch" optimization in the impl.
+     *
+     * Mutation that would fail this:
+     *   * Removing the `listeners.isEmpty()` guard before the for-loop — would still produce
+     *     correct (no) behavior because zero listeners = nothing to iterate. NOT directly
+     *     observable. This test pins only that no exception fires; the optimization is
+     *     mechanical and verified by code review.
+     */
+    @Test
+    fun `upsertAll with no listeners does not throw`() {
+        val store = DefaultMemoryStore()
+        // Intentionally no addChangeListener — must not throw on the dispatch path.
+        store.upsertAll(listOf(flag("a", "1"), flag("b", "2")))
+        assertEquals("1", store.get("a")?.variation)
+        assertEquals("2", store.get("b")?.variation)
+    }
 }
