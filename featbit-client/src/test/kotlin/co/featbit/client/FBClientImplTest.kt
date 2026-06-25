@@ -81,6 +81,51 @@ class FBClientImplTest {
         client.close()
     }
 
+    /**
+     * Contract: the fast-path `*Variation()` getters honor the same not-ready guard as
+     * `evaluateCore`. With an uninitialized client and no bootstrap, every fast-path getter
+     * must return the caller's default — no flag lookup, no insight emission, no exception.
+     *
+     * This pins the `if (!initialized && options.bootstrap.isEmpty()) return default` line
+     * in `evaluateValue`. The combined "value and detail getters agree" test runs against an
+     * offline+bootstrap client (initialized=true), so it can't catch a mutation that drops
+     * this guard — this test does.
+     *
+     * Mutation that would fail this:
+     *   * Removing the not-ready guard in evaluateValue — the call would fall through to
+     *     `evaluator.evaluate(key)`, which would still return NotFound for an empty store
+     *     (so default would be returned by accident). BUT: insight would also be skipped on
+     *     NotFound, so the *observable* output stays "default" either way. The mutation is
+     *     therefore semantically benign for the empty-store case. Acknowledge: this test
+     *     can't catch the mutation as currently written without store inspection. What it
+     *     DOES catch is a stronger mutation: the fast-path throwing or returning a
+     *     non-default value when called pre-init.
+     *   * Fast-path crashing on null userRef before guard checked — would throw rather
+     *     than return default cleanly.
+     *
+     * Honest scope: the in-tree guard is mechanical and read by code review. This test
+     * pins the end-to-end "no throw, returns default" surface.
+     */
+    @Test
+    fun `fast-path returns default when uninitialized without bootstrap`() {
+        // Non-offline, never started, no bootstrap — explicit pre-init state.
+        val options = FBOptions.Builder("secret").build()
+        val client = FBClientImpl(options, user)
+        try {
+            assertFalse("client must be in pre-init state", client.initialized)
+
+            // Every fast-path getter must return the caller's default.
+            assertEquals(false, client.boolVariation("any", default = false))
+            assertEquals(true, client.boolVariation("any", default = true))
+            assertEquals(-1, client.intVariation("any", default = -1))
+            assertEquals(0.5f, client.floatVariation("any", default = 0.5f))
+            assertEquals(0.25, client.doubleVariation("any", default = 0.25), 0.0001)
+            assertEquals("fallback", client.stringVariation("any", default = "fallback"))
+        } finally {
+            client.close()
+        }
+    }
+
     @Test
     fun `allFlags returns bootstrap snapshot`() {
         val client = offlineClientWith(
@@ -91,6 +136,71 @@ class FBClientImplTest {
         assertEquals(setOf("a", "b"), all.keys)
         assertEquals("1", all["a"]?.variation)
         client.close()
+    }
+
+    /**
+     * Contract: `*Variation()` (no-detail) and `*VariationDetail()` are sibling APIs that
+     * must agree on the returned value for every input. The non-detail variants go through
+     * the `evaluateValue` fast-path which skips the `EvalDetail` allocation; detail variants
+     * go through `evaluateCore`. Both code paths must produce the same value across:
+     *   - found flag with valid conversion
+     *   - found flag with type mismatch (falls back to default)
+     *   - unknown flag (falls back to default)
+     *   - bool / int / float / double / string converter coverage
+     *
+     * Mutation that would fail this:
+     *   * The fast-path uses a different converter than the detail-path (e.g. swaps int for
+     *     float) → typed value diverges between the two getters.
+     *   * Fast-path skips the "type mismatch → default" branch (returns the converter's
+     *     null instead of falling back) → mismatched-type cases would NPE or return wrong
+     *     value.
+     *
+     * Note: this test runs with `initialized=true` (offline client with bootstrap), so it
+     * does NOT cover the fast-path's `!initialized && bootstrap.isEmpty()` guard. That
+     * branch is exercised separately by `fast-path returns default when uninitialized
+     * without bootstrap`.
+     */
+    @Test
+    fun `value and detail getters agree across types and miss-paths`() = runBlocking {
+        val client = offlineClientWith(
+            FeatureFlag(id = "bool-flag", variation = "true"),
+            FeatureFlag(id = "int-flag", variation = "42"),
+            FeatureFlag(id = "float-flag", variation = "1.5"),
+            FeatureFlag(id = "double-flag", variation = "2.25"),
+            FeatureFlag(id = "string-flag", variation = "hello"),
+            FeatureFlag(id = "bad-bool", variation = "not-a-bool"),
+            FeatureFlag(id = "bad-int", variation = "not-an-int"),
+        )
+        client.start()
+        try {
+            assertEquals(true, client.boolVariation("bool-flag"))
+            assertEquals(client.boolVariationDetail("bool-flag").value, client.boolVariation("bool-flag"))
+
+            assertEquals(42, client.intVariation("int-flag", default = 0))
+            assertEquals(client.intVariationDetail("int-flag", default = 0).value, client.intVariation("int-flag", default = 0))
+
+            assertEquals(1.5f, client.floatVariation("float-flag", default = 0f))
+            assertEquals(client.floatVariationDetail("float-flag", default = 0f).value, client.floatVariation("float-flag", default = 0f))
+
+            assertEquals(2.25, client.doubleVariation("double-flag", default = 0.0), 0.0001)
+            assertEquals(client.doubleVariationDetail("double-flag", default = 0.0).value, client.doubleVariation("double-flag", default = 0.0), 0.0001)
+
+            assertEquals("hello", client.stringVariation("string-flag"))
+            assertEquals(client.stringVariationDetail("string-flag").value, client.stringVariation("string-flag"))
+
+            // Type mismatch — both must fall back to default.
+            assertEquals(false, client.boolVariation("bad-bool", default = false))
+            assertEquals(client.boolVariationDetail("bad-bool", default = false).value, client.boolVariation("bad-bool", default = false))
+
+            assertEquals(-1, client.intVariation("bad-int", default = -1))
+            assertEquals(client.intVariationDetail("bad-int", default = -1).value, client.intVariation("bad-int", default = -1))
+
+            // Unknown flag — both must fall back to default.
+            assertEquals("fallback", client.stringVariation("missing", default = "fallback"))
+            assertEquals(client.stringVariationDetail("missing", default = "fallback").value, client.stringVariation("missing", default = "fallback"))
+        } finally {
+            client.close()
+        }
     }
 
     // ---------------------------------------------------------------------------------------

@@ -24,11 +24,16 @@ public class FBUser internal constructor(
     public val name: String,
     public val custom: Map<String, String>,
 ) {
-    internal fun toEndUser(): EndUser = EndUser(
+    // FBUser is immutable, so its wire representation is too. Building it once at construction
+    // (rather than per evaluation insight) eliminates a per-flag-check allocation of EndUser +
+    // CustomizedProperty list + (N+1) entries for an N-custom-attribute user.
+    private val endUser: EndUser = EndUser(
         keyId = key,
         name = name,
         customizedProperties = custom.map { (k, v) -> CustomizedProperty(k, v) },
     )
+
+    internal fun toEndUser(): EndUser = endUser
 
     /** Fluent builder for [FBUser]. */
     public class Builder(private val key: String) {

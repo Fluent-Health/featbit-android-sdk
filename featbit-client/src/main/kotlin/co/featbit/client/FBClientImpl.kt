@@ -70,6 +70,12 @@ public class FBClientImpl(
         if (options.offline) NoopTrackInsight else HttpTrackInsight(options, endpoints = endpoints!!)
     private val insights: InsightDispatcher = InsightDispatcher(tracker, scope, logger)
 
+    // When the tracker is the no-op (offline mode), every Insight we'd build is thrown away by
+    // the consumer. Short-circuit at the *call site* so we don't allocate Insight +
+    // VariationInsight + VariationData per evaluation just to discard them — that's ~3 garbage
+    // objects per flag check the JVM never has to see in offline.
+    private val insightsEnabled: Boolean = tracker !is NoopTrackInsight
+
     // user is read on every evaluation; AtomicReference gives lock-free reads + atomic swap on identify().
     private val userRef = AtomicReference(initialUser)
 
@@ -124,41 +130,49 @@ public class FBClientImpl(
 
         val success = withTimeoutOrNull(timeout) { fresh.start() } ?: false
 
-        insights.offer(Insight.forIdentify(user))
+        if (insightsEnabled) insights.offer(Insight.forIdentify(user))
         success
     }
 
     override fun boolVariation(key: String, default: Boolean): Boolean =
-        evaluateCore(key, default, ValueConverters.bool).value
+        evaluateValue(key, default, ValueConverters.bool)
 
     override fun boolVariationDetail(key: String, default: Boolean): EvalDetail<Boolean> =
         evaluateCore(key, default, ValueConverters.bool)
 
     override fun intVariation(key: String, default: Int): Int =
-        evaluateCore(key, default, ValueConverters.int).value
+        evaluateValue(key, default, ValueConverters.int)
 
     override fun intVariationDetail(key: String, default: Int): EvalDetail<Int> =
         evaluateCore(key, default, ValueConverters.int)
 
     override fun floatVariation(key: String, default: Float): Float =
-        evaluateCore(key, default, ValueConverters.float).value
+        evaluateValue(key, default, ValueConverters.float)
 
     override fun floatVariationDetail(key: String, default: Float): EvalDetail<Float> =
         evaluateCore(key, default, ValueConverters.float)
 
     override fun doubleVariation(key: String, default: Double): Double =
-        evaluateCore(key, default, ValueConverters.double).value
+        evaluateValue(key, default, ValueConverters.double)
 
     override fun doubleVariationDetail(key: String, default: Double): EvalDetail<Double> =
         evaluateCore(key, default, ValueConverters.double)
 
     override fun stringVariation(key: String, default: String): String =
-        evaluateCore(key, default, ValueConverters.string).value
+        evaluateValue(key, default, ValueConverters.string)
 
     override fun stringVariationDetail(key: String, default: String): EvalDetail<String> =
         evaluateCore(key, default, ValueConverters.string)
 
-    override fun allFlags(): Map<String, FeatureFlag> = store.getAll().associateBy { it.id }
+    override fun allFlags(): Map<String, FeatureFlag> {
+        // store.getAll() already returns a fresh Collection snapshot; calling .associateBy
+        // here would walk it a second time + allocate the intermediate List. Build the result
+        // map directly from the snapshot — one allocation, one pass.
+        val snapshot = store.getAll()
+        val result = LinkedHashMap<String, FeatureFlag>(snapshot.size)
+        for (flag in snapshot) result[flag.id] = flag
+        return result
+    }
 
     override fun setForeground(foreground: Boolean): Unit = lifecycle.onForegroundChanged(foreground)
 
@@ -177,10 +191,34 @@ public class FBClientImpl(
         return when (val result = evaluator.evaluate(key)) {
             is EvalResult.NotFound -> EvalDetail(result.reason, default)
             is EvalResult.Found -> {
-                insights.offer(Insight.forEvaluation(userRef.get(), result.flag, System.currentTimeMillis()))
+                if (insightsEnabled) {
+                    insights.offer(
+                        Insight.forEvaluation(userRef.get(), result.flag, System.currentTimeMillis()),
+                    )
+                }
                 val typed = converter(result.value)
                 if (typed != null) EvalDetail(result.reason, typed)
                 else EvalDetail("type mismatch", default)
+            }
+        }
+    }
+
+    // Fast-path for `*Variation()` getters that discard `.reason` immediately. Skips the
+    // EvalDetail allocation that evaluateCore() would otherwise build and the caller would
+    // throw away. The detail-returning getters keep going through evaluateCore so they can
+    // surface the per-call reason string.
+    private fun <T> evaluateValue(key: String, default: T, converter: ValueConverter<T>): T {
+        if (!initialized && options.bootstrap.isEmpty()) return default
+
+        return when (val result = evaluator.evaluate(key)) {
+            is EvalResult.NotFound -> default
+            is EvalResult.Found -> {
+                if (insightsEnabled) {
+                    insights.offer(
+                        Insight.forEvaluation(userRef.get(), result.flag, System.currentTimeMillis()),
+                    )
+                }
+                converter(result.value) ?: default
             }
         }
     }
