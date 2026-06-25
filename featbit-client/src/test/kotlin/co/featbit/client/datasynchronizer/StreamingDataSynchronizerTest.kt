@@ -2,7 +2,7 @@ package co.featbit.client.datasynchronizer
 
 import co.featbit.client.model.FBUser
 import co.featbit.client.options.FBOptions
-import co.featbit.client.store.DefaultMemoryStore
+import co.featbit.client.app.DefaultMemoryStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking

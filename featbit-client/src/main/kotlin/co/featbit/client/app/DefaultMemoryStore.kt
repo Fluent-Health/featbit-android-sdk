@@ -1,6 +1,9 @@
-package co.featbit.client.store
+package co.featbit.client.app
 
+import co.featbit.client.domain.MemoryStore
 import co.featbit.client.model.FeatureFlag
+import co.featbit.client.store.FlagChangeListener
+import co.featbit.client.store.FlagValueChangedEvent
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 

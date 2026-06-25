@@ -1,8 +1,9 @@
-package co.featbit.client.changetracker
+package co.featbit.client.app
 
+import co.featbit.client.changetracker.FlagTracker
+import co.featbit.client.domain.MemoryStore
 import co.featbit.client.store.FlagChangeListener
 import co.featbit.client.store.FlagValueChangedEvent
-import co.featbit.client.store.MemoryStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow

@@ -1,4 +1,4 @@
-package co.featbit.client
+package co.featbit.client.app
 
 import co.featbit.client.datasynchronizer.DataSynchronizer
 import kotlinx.coroutines.CoroutineScope

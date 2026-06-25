@@ -1,6 +1,7 @@
-package co.featbit.client.store
+package co.featbit.client.domain
 
 import co.featbit.client.model.FeatureFlag
+import co.featbit.client.store.FlagChangeListener
 
 /**
  * A thread-safe in-memory store holding the feature flag data received by the SDK.

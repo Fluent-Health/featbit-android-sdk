@@ -1,6 +1,8 @@
-package co.featbit.client.store
+package co.featbit.client.app
 
 import co.featbit.client.model.FeatureFlag
+import co.featbit.client.store.FlagChangeListener
+import co.featbit.client.store.FlagValueChangedEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue

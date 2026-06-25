@@ -1,13 +1,16 @@
 package co.featbit.client
 
+import co.featbit.client.app.DefaultMemoryStore
+import co.featbit.client.app.FlagTrackerImpl
+import co.featbit.client.app.LifecycleController
 import co.featbit.client.changetracker.FlagTracker
-import co.featbit.client.changetracker.FlagTrackerImpl
 import co.featbit.client.datasynchronizer.DataSynchronizer
 import co.featbit.client.datasynchronizer.NullDataSynchronizer
 import co.featbit.client.datasynchronizer.PollingDataSynchronizer
 import co.featbit.client.datasynchronizer.StreamingDataSynchronizer
 import co.featbit.client.domain.EvalResult
 import co.featbit.client.domain.Evaluator
+import co.featbit.client.domain.MemoryStore
 import co.featbit.client.domain.ValueConverter
 import co.featbit.client.domain.ValueConverters
 import co.featbit.client.evaluation.EvalDetail
@@ -21,8 +24,6 @@ import co.featbit.client.model.FeatureFlag
 import co.featbit.client.model.Insight
 import co.featbit.client.options.DataSyncMode
 import co.featbit.client.options.FBOptions
-import co.featbit.client.store.DefaultMemoryStore
-import co.featbit.client.store.MemoryStore
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

@@ -1,7 +1,7 @@
 package co.featbit.client.domain
 
 import co.featbit.client.model.FeatureFlag
-import co.featbit.client.store.DefaultMemoryStore
+import co.featbit.client.app.DefaultMemoryStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue

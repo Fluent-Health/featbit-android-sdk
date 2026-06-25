@@ -1,8 +1,7 @@
-package co.featbit.client.changetracker
+package co.featbit.client.app
 
 import app.cash.turbine.test
 import co.featbit.client.model.FeatureFlag
-import co.featbit.client.store.DefaultMemoryStore
 import co.featbit.client.store.FlagValueChangedEvent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals

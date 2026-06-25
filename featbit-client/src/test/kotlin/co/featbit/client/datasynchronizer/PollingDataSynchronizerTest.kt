@@ -2,10 +2,10 @@ package co.featbit.client.datasynchronizer
 
 import co.featbit.client.model.FBUser
 import co.featbit.client.model.FeatureFlag
+import co.featbit.client.app.DefaultMemoryStore
+import co.featbit.client.domain.MemoryStore
 import co.featbit.client.options.FBOptions
-import co.featbit.client.store.DefaultMemoryStore
 import co.featbit.client.store.FlagChangeListener
-import co.featbit.client.store.MemoryStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay

@@ -6,7 +6,7 @@ import co.featbit.client.model.EndUser
 import co.featbit.client.model.FBUser
 import co.featbit.client.model.FeatureFlag
 import co.featbit.client.options.FBOptions
-import co.featbit.client.store.MemoryStore
+import co.featbit.client.domain.MemoryStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
