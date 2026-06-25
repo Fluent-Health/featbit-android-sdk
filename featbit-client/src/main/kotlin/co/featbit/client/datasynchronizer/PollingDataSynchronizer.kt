@@ -1,5 +1,6 @@
 package co.featbit.client.datasynchronizer
 
+import co.featbit.client.internal.FBEndpoints
 import co.featbit.client.internal.GetUserFlags
 import co.featbit.client.model.FBUser
 import co.featbit.client.options.FBOptions
@@ -8,10 +9,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration
@@ -26,7 +28,8 @@ internal class PollingDataSynchronizer(
     user: FBUser,
     private val store: MemoryStore,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
-    private val getUserFlags: GetUserFlags = GetUserFlags(options, user),
+    endpoints: FBEndpoints = FBEndpoints.from(options),
+    private val getUserFlags: GetUserFlags = GetUserFlags(options, user, endpoints = endpoints),
 ) : DataSynchronizer {
 
     private val logger = options.logger
@@ -35,6 +38,8 @@ internal class PollingDataSynchronizer(
 
     private val startTask = CompletableDeferred<Boolean>()
     private val initializedFlag = AtomicBoolean(false)
+    @Volatile
+    private var loopJob: Job? = null
 
     @Volatile
     private var timestamp: Long = 0
@@ -42,21 +47,15 @@ internal class PollingDataSynchronizer(
     override val initialized: Boolean get() = initializedFlag.get()
 
     override suspend fun start(): Boolean {
-        scope.launch { pollingLoop() }
+        loopJob = scope.launch { pollingLoop() }
         return startTask.await()
     }
 
     private suspend fun pollingLoop() {
-        while (scope.isActive) {
+        while (true) {
             safePoll()
-            try {
-                logger.debug { "Waiting for the next polling interval of $pollingInterval." }
-                delay(pollingInterval)
-            } catch (_: CancellationException) {
-                throw CancellationException()
-            } catch (ex: Exception) {
-                logger.error("An unexpected error occurred while waiting for the next polling interval.", ex)
-            }
+            logger.debug { "Waiting for the next polling interval of $pollingInterval." }
+            delay(pollingInterval)
         }
     }
 
@@ -98,6 +97,19 @@ internal class PollingDataSynchronizer(
         scope.cancel()
         getUserFlags.close()
         // Ensure a never-initialized synchronizer doesn't leave start() suspended forever.
+        startTask.complete(false)
+    }
+
+    /**
+     * Orderly shutdown: cancel the polling loop and *await* its termination so any in-flight
+     * `safePoll` (mid-`store.upsert`) has finished before this returns. Used by
+     * `FBClientImpl.identify` to guarantee no stale upsert from the previous user lands after
+     * the swap.
+     */
+    override suspend fun closeAndJoin() {
+        loopJob?.cancelAndJoin()
+        scope.cancel()
+        getUserFlags.close()
         startTask.complete(false)
     }
 }

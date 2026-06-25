@@ -1,6 +1,7 @@
 package co.featbit.client.datasynchronizer
 
 import co.featbit.client.internal.ConnectionToken
+import co.featbit.client.internal.FBEndpoints
 import co.featbit.client.model.EndUser
 import co.featbit.client.model.FBUser
 import co.featbit.client.model.FeatureFlag
@@ -12,14 +13,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -44,14 +46,20 @@ internal class StreamingDataSynchronizer(
     private val user: FBUser,
     private val store: MemoryStore,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
-    private val httpClient: OkHttpClient = OkHttpClient.Builder()
-        .pingInterval(20, TimeUnit.SECONDS)
-        .build(),
+    httpClient: OkHttpClient? = null,
+    endpoints: FBEndpoints = FBEndpoints.from(options),
 ) : DataSynchronizer {
 
     private val logger = options.logger
     private val secret = options.secret
-    private val streamingEndpoint = options.streamingUri.toStreamingHttpUrl()
+    private val streamingEndpoint = endpoints.streaming
+
+    // Ownership tracking mirrors `FbApiClient`: when the caller supplies a client, we leave its
+    // lifecycle to them. When we constructed our own, we must release its dispatcher's worker
+    // threads + connection pool on teardown — otherwise each identify() cycle leaks an
+    // OkHttpClient (its idle threads + WS connection in the pool) until OkHttp's own GC kicks in.
+    private val ownsClient: Boolean = httpClient == null
+    private val httpClient: OkHttpClient = httpClient ?: defaultHttpClient()
 
     private val startTask = CompletableDeferred<Boolean>()
     private val initializedFlag = AtomicBoolean(false)
@@ -97,6 +105,9 @@ internal class StreamingDataSynchronizer(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
+            // Drop late messages that arrive after close()/closeAndJoin() — otherwise an
+            // upsert from a previous user could land in the store after the user-swap.
+            if (closed) return
             scope.launch { handleMessage(text) }
         }
 
@@ -188,7 +199,39 @@ internal class StreamingDataSynchronizer(
         webSocket?.close(NORMAL_CLOSURE, null)
         webSocket = null
         scope.cancel()
+        releaseHttpClient()
         startTask.complete(false)
+    }
+
+    /**
+     * Orderly shutdown: close the WebSocket, cancel every child coroutine on [scope], and
+     * *await* their completion before returning. Used by `FBClientImpl.identify` so an upsert
+     * from a `data-sync` message in flight at swap time cannot land in the store under the
+     * new user.
+     *
+     * Implementation note: we cancel the scope's parent [SupervisorJob] with `cancelAndJoin`
+     * — the idiomatic Kotlin primitive for "stop everything on this scope and wait." Once the
+     * Job moves to CANCELLING, any subsequent `scope.launch` from OkHttp's dispatcher (a late
+     * `onOpen → startHeartbeat`, a delayed `scheduleReconnect`) returns an already-cancelled
+     * Job whose body never executes. A `children.toList() + joinAll(...)` snapshot would
+     * race here: a child spawning between snapshot and join would escape the join.
+     */
+    override suspend fun closeAndJoin() {
+        closed = true
+        heartbeatJob?.cancel()
+        webSocket?.close(NORMAL_CLOSURE, null)
+        webSocket = null
+        scope.coroutineContext.job.cancelAndJoin()
+        releaseHttpClient()
+        startTask.complete(false)
+    }
+
+    private fun releaseHttpClient() {
+        if (!ownsClient) return
+        // Mirrors `FbApiClient.close()` — shut down the dispatcher's executor (signals worker
+        // threads to exit when idle) and evict pooled connections immediately.
+        httpClient.dispatcher.executorService.shutdown()
+        httpClient.connectionPool.evictAll()
     }
 
     @Serializable
@@ -216,8 +259,8 @@ internal class StreamingDataSynchronizer(
 
         val StreamingJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-        /** Accepts `ws(s)://` (or `http(s)://`) and returns the `/streaming` HTTP(S) URL OkHttp uses. */
-        fun String.toStreamingHttpUrl() =
-            replaceFirst(Regex("^ws"), "http").toHttpUrl().newBuilder().addPathSegment("streaming").build()
+        private fun defaultHttpClient(): OkHttpClient = OkHttpClient.Builder()
+            .pingInterval(20, TimeUnit.SECONDS)
+            .build()
     }
 }

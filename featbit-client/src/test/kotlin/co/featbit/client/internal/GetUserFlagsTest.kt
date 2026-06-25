@@ -8,6 +8,7 @@ import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -87,5 +88,41 @@ class GetUserFlagsTest {
         client.close()
         assertFalse(transient.isFatal)
         assertTrue(transient.isError)
+    }
+
+    @Test
+    fun `wire-shape mismatch on data field throws (not silent zero flags)`() = runBlocking {
+        // Regression: an earlier refactor silently downgraded malformed payloads to "no flags",
+        // which is indistinguishable from a legitimate empty configuration and made the SDK
+        // serve defaults forever. The shape mismatch must surface as an exception so the
+        // caller's `safePoll` logs it as an error.
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"data":"oops, not an object"}"""),
+        )
+        val client = newClient()
+        assertThrows(Exception::class.java) {
+            runBlocking { client.run(0) }
+        }
+        client.close()
+    }
+
+    @Test
+    fun `missing data field yields empty flags (legitimate empty config)`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+        val client = newClient()
+        val response = client.run(0)
+        client.close()
+        assertFalse(response.isError)
+        assertTrue("no flags configured for user — not an error", response.flags.isEmpty())
+    }
+
+    @Test
+    fun `missing featureFlags key yields empty flags`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"data":{}}"""))
+        val client = newClient()
+        val response = client.run(0)
+        client.close()
+        assertFalse(response.isError)
+        assertTrue(response.flags.isEmpty())
     }
 }

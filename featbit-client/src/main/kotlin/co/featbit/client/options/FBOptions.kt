@@ -87,18 +87,31 @@ public class FBOptions internal constructor(
         /** Sets the logger used by the SDK. Defaults to a [DefaultLogger]. */
         public fun logger(logger: FBLogger): Builder = apply { this.logger = logger }
 
-        public fun build(): FBOptions = FBOptions(
-            offline = offline,
-            bootstrap = bootstrap,
-            secret = secret,
-            dataSyncMode = dataSyncMode,
-            pollingUri = pollingUri,
-            pollingInterval = pollingInterval,
-            streamingUri = streamingUri,
-            eventUri = eventUri,
-            backgroundGracePeriod = backgroundGracePeriod,
-            logger = logger,
-        )
+        public fun build(): FBOptions {
+            // Validate eagerly so misconfiguration fails at SDK init, not on the first network call.
+            if (!offline) {
+                require(secret.isNotBlank()) { "FBOptions.secret must not be blank when offline=false" }
+                require(pollingUri.isNotBlank()) { "polling URI must not be blank" }
+                require(eventUri.isNotBlank()) { "event URI must not be blank" }
+                if (dataSyncMode == DataSyncMode.Streaming) {
+                    require(streamingUri.isNotBlank()) { "streaming URI must not be blank" }
+                }
+            }
+            require(pollingInterval.isPositive()) { "pollingInterval must be positive" }
+            require(!backgroundGracePeriod.isNegative()) { "backgroundGracePeriod must not be negative" }
+            return FBOptions(
+                offline = offline,
+                bootstrap = bootstrap,
+                secret = secret,
+                dataSyncMode = dataSyncMode,
+                pollingUri = pollingUri,
+                pollingInterval = pollingInterval,
+                streamingUri = streamingUri,
+                eventUri = eventUri,
+                backgroundGracePeriod = backgroundGracePeriod,
+                logger = logger,
+            )
+        }
 
         public companion object {
             private const val DEFAULT_URI: String = "http://localhost:5100"

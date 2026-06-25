@@ -6,9 +6,8 @@ import co.featbit.client.model.FeatureFlag
 import co.featbit.client.options.FBOptions
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 
 /**
@@ -36,11 +35,10 @@ internal class GetUserFlags(
     options: FBOptions,
     user: FBUser,
     httpClient: OkHttpClient? = null,
+    endpoints: FBEndpoints = FBEndpoints.from(options),
 ) : FbApiClient(options, httpClient) {
 
-    private val endpoint: HttpUrl = options.pollingUri.toHttpUrl().newBuilder()
-        .addPathSegments(HttpConstants.LATEST_ALL_PATH)
-        .build()
+    private val endpoint = endpoints.latestAll
 
     private val payload: ByteArray =
         json.encodeToString(EndUser.serializer(), user.toEndUser()).encodeToByteArray()
@@ -58,11 +56,13 @@ internal class GetUserFlags(
             return GetUserFlagsResponse.ok(emptyList())
         }
 
-        val featureFlags = json.parseToJsonElement(result.body)
-            .jsonObject["data"]?.jsonObject
-            ?.get("featureFlags")
-            ?.let { json.decodeFromJsonElement(ListSerializer(FeatureFlag.serializer()), it) }
-            ?: emptyList()
+        // Wire shape: `{"data": {"featureFlags": [...]}}`. We let `.jsonObject` / `.jsonArray`
+        // throw on a shape mismatch — `safePoll` catches and logs it as an error. Quietly
+        // returning `emptyList()` on a malformed payload would be indistinguishable from
+        // "user has no flags" and would silently serve defaults forever.
+        val data = json.parseToJsonElement(result.body).jsonObject["data"]?.jsonObject
+        val featureFlagsArr = data?.get("featureFlags")?.jsonArray ?: return GetUserFlagsResponse.ok(emptyList())
+        val featureFlags = json.decodeFromJsonElement(ListSerializer(FeatureFlag.serializer()), featureFlagsArr)
 
         return GetUserFlagsResponse.ok(featureFlags)
     }

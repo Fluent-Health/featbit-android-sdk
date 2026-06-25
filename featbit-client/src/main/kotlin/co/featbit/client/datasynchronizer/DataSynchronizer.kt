@@ -27,4 +27,16 @@ internal interface DataSynchronizer : Closeable {
      * repeatedly. Default: no-op.
      */
     fun resume() {}
+
+    /**
+     * Orderly shutdown: signal stop, then suspend until every in-flight upsert / network call
+     * has completed. Use this from [FBClientImpl.identify] so a late polling response from the
+     * previous user cannot land in the store *after* the user-swap.
+     *
+     * The non-suspending [close] is the fire-and-forget fallback for `Closeable` semantics;
+     * implementations should make it forward to [closeAndJoin] on a best-effort basis.
+     */
+    suspend fun closeAndJoin() {
+        close()
+    }
 }
