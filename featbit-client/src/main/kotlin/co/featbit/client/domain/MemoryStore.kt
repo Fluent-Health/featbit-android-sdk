@@ -5,6 +5,12 @@ import co.featbit.client.store.FlagChangeListener
 
 /**
  * A thread-safe in-memory store holding the feature flag data received by the SDK.
+ *
+ * Default-method note: under the module's `-Xjvm-default=all-compatibility` compiler
+ * flag, default-method bodies on this interface land directly in the interface bytecode
+ * (real Java 8 defaults) with a synthetic `DefaultImpls` class as a fallback for legacy
+ * binary implementers compiled against an older version of this interface. Adding a new
+ * default method (e.g. [upsertAll]) is binary-compatible.
  */
 public interface MemoryStore {
     /** Returns the flag with the given [id], or `null` if unknown. */

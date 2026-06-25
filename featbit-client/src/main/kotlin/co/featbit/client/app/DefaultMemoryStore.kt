@@ -45,6 +45,16 @@ public class DefaultMemoryStore(
      * snapshot per response. The pre-existing per-flag [upsert] enters the writeLock N times
      * (N monitor enters + N exits); this variant enters once. Change events are still raised
      * one-per-flag, *outside* the lock, so listener latency cannot stall the writer thread.
+     *
+     * Listener-throw semantics: a `forEach` callback that throws unwinds out of both the
+     * inner `listeners.forEach` AND the outer `for (event in events)` loop, so subsequent
+     * events for the batch will not fire listeners. This matches the legacy
+     * `response.flags.forEach { store.upsert(it) }` polling-caller behavior (same unwind),
+     * but with a directional improvement: under the legacy path, a listener throwing on
+     * event K aborted upserts K+1..N as well; under this bulk path, ALL writes are committed
+     * under the lock BEFORE any listener fires, so the store reaches its post-batch state
+     * regardless of listener throws downstream. Listeners that need exception isolation
+     * should wrap their own onChange bodies.
      */
     override fun upsertAll(flags: Collection<FeatureFlag>) {
         if (flags.isEmpty()) return

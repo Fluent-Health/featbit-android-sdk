@@ -463,4 +463,157 @@ class FBClientImplTest {
             server.shutdown()
         }
     }
+
+    /**
+     * Contract: the fast-path `*Variation()` getters MUST emit one insight per `Found`
+     * evaluation when insights are enabled (online tracker). Symmetric to the detail-path —
+     * but the existing `value and detail getters agree` test uses an offline client where
+     * `insightsEnabled == false`, so neither path emits and the test can't catch a mutation
+     * that drops `insights.offer(...)` from `evaluateValue`'s Found branch.
+     *
+     * Driving an online client against MockWebServer exercises the full chain:
+     *   polling sync → store.upsertAll(flags) → `boolVariation()` → evaluateValue Found →
+     *   insights.offer → InsightDispatcher batch → HttpTrackInsight POST → MockWebServer.
+     * `client.close()` triggers `insights.closeAndDrain()` which flushes immediately
+     * regardless of the 1s batch interval.
+     *
+     * Mutation that would fail this:
+     *   * Removing `insights.offer(...)` from `evaluateValue` — no insight POST is ever
+     *     made, server records only the polling request(s). Assertion on a recorded insight
+     *     request fails.
+     *   * Replacing the fast-path's `Insight.forEvaluation` argument list (e.g. forgetting
+     *     to pass `result.flag`) — payload shape diverges; serialization or downstream
+     *     assertion fails.
+     *   * Routing the fast-path through evaluateCore — would still emit, test passes; this
+     *     is the wrong mutation to focus on (test catches absence of emission, not which
+     *     code-path emitted).
+     */
+    @Test
+    fun `fast-path boolVariation emits insight via online tracker`() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        try {
+            // Polling response: one flag we'll evaluate.
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody(
+                    """{"data":{"featureFlags":[{"id":"f","variation":"true","matchReason":"fallthrough"}]}}""",
+                ),
+            )
+            // Insight track response: 200 OK is enough; the tracker discards the body.
+            server.enqueue(MockResponse().setResponseCode(200))
+
+            val options = FBOptions.Builder("secret")
+                .polling(server.url("/").toString(), interval = 10.seconds)
+                .event(server.url("/").toString())
+                .build()
+            val client = FBClientImpl(options, FBUser.builder("u1").name("bob").build())
+            try {
+                assertTrue("polling start", client.start(timeout = 5.seconds))
+
+                // Fast-path call — no detail variant, value-only return. evaluateValue should
+                // emit one insight via the dispatcher.
+                assertEquals(true, client.boolVariation("f"))
+            } finally {
+                // Forces insight drain — closeAndDrain bypasses the 1s flush interval.
+                client.close()
+            }
+
+            // Wait (bounded) for the insight POST to land at MockWebServer. `client.close()`
+            // returns once `closeAndDrain` joins the consumer + calls `tracker.close()`, but
+            // OkHttp's dispatcher executor only signals shutdown — in-flight calls finish on
+            // their own threads. A 1ms `takeRequest` after close races the on-the-wire POST.
+            //
+            // Strategy: drain requests with a per-poll budget that's large enough to absorb
+            // CI scheduler hiccups, then assert at least one insight POST appeared. The
+            // total wall-budget is bounded by `attempts × pollMs`.
+            val recordedPaths = mutableListOf<String>()
+            var insightHits = 0
+            val pollMs = 250L
+            val maxAttempts = 8 // 8 × 250ms = 2s total budget; CI noise tolerance.
+            for (attempt in 1..maxAttempts) {
+                val req = server.takeRequest(pollMs, java.util.concurrent.TimeUnit.MILLISECONDS) ?: break
+                val path = req.path ?: ""
+                recordedPaths += path
+                if (path.startsWith("/api/public/insight/")) {
+                    insightHits++
+                    break // one insight is enough — drain stops here to keep wall-time tight
+                }
+            }
+            assertTrue(
+                "fast-path eval must emit at least one insight within 2s (paths: $recordedPaths)",
+                insightHits >= 1,
+            )
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    /**
+     * Contract: the fast-path's `!initialized && options.bootstrap.isEmpty()` guard must
+     * return the caller's default WITHOUT emitting any insight. The Found branch is gated by
+     * `if (insightsEnabled)` so emission ONLY happens when the evaluator resolves a flag —
+     * the guard short-circuits before evaluator.evaluate is even called.
+     *
+     * This pairs with the prior `fast-path returns default when uninitialized without
+     * bootstrap` test (which only checks the return value); here we additionally pin that
+     * the insight pipeline is NOT exercised when the guard fires.
+     *
+     * Setup: online client (insightsEnabled = true), but never started — polling sync sits
+     * in pre-init with empty store. Hit fast-path getters; assert no insight POST landed.
+     *
+     * Mutation that would fail this:
+     *   * Removing the `!initialized && options.bootstrap.isEmpty()` guard from
+     *     evaluateValue — control would flow into the `when (evaluator.evaluate)` block.
+     *     For an empty store this still falls into the NotFound branch (returns default),
+     *     so the return value alone can't catch the mutation. But the Found branch now
+     *     becomes reachable for any future code path that pre-populates the store under
+     *     `!initialized` — the guard is the only place that prevents an insight from being
+     *     emitted pre-init when bootstrap is empty. THIS test catches the symptom directly:
+     *     no insight POST has been observed pre-init.
+     *
+     * Honest scope: with the current evaluator + empty store, the NotFound branch returns
+     * default and skips insight emission — same observable outcome as the guard firing.
+     * What this test really pins is "the fast-path emits zero insight requests pre-init"
+     * end-to-end. A mutation that drops the guard AND moves insight emission to the
+     * NotFound branch would still slide. The mechanical guard is read by code review.
+     */
+    @Test
+    fun `fast-path emits no insight when uninitialized without bootstrap`() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        try {
+            // No polling response enqueued — the polling sync hangs on its first request.
+            // The client never reaches `initialized = true`, so all evaluations go down the
+            // pre-init fast-path guard.
+            val options = FBOptions.Builder("secret")
+                .polling(server.url("/").toString(), interval = 10.seconds)
+                .event(server.url("/").toString())
+                .build()
+            val client = FBClientImpl(options, FBUser.builder("u1").build())
+
+            // Short start timeout — we don't wait for polling to succeed.
+            client.start(timeout = 100.milliseconds)
+            assertFalse("client must remain in pre-init", client.initialized)
+
+            // Fast-path calls — all must return default and emit zero insights.
+            assertEquals(false, client.boolVariation("any", default = false))
+            assertEquals(true, client.boolVariation("any", default = true))
+            assertEquals("default", client.stringVariation("any", default = "default"))
+
+            client.close()
+
+            // Drain all requests the server saw; assert none were insight POSTs.
+            val recordedPaths = generateSequence { server.takeRequest(50, java.util.concurrent.TimeUnit.MILLISECONDS) }
+                .map { it.path ?: "" }
+                .toList()
+            val insightHits = recordedPaths.count { it.startsWith("/api/public/insight/") }
+            assertEquals(
+                "pre-init fast-path must not emit any insight (paths: $recordedPaths)",
+                0,
+                insightHits,
+            )
+        } finally {
+            server.shutdown()
+        }
+    }
 }

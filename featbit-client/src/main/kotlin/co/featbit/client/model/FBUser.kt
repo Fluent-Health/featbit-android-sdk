@@ -26,11 +26,18 @@ public class FBUser internal constructor(
 ) {
     // FBUser is immutable, so its wire representation is too. Building it once at construction
     // (rather than per evaluation insight) eliminates a per-flag-check allocation of EndUser +
-    // CustomizedProperty list + (N+1) entries for an N-custom-attribute user.
+    // CustomizedProperty list + the singleton-list wrapper + N CustomizedProperty entries for
+    // an N-custom-attribute user (so ~4 objects per evaluation just for the wire form).
+    //
+    // The list is wrapped in `unmodifiableList` so SDK-internal code can't `as MutableList`
+    // and corrupt the cached payload — this cache is per-FBUser-lifetime; in-place mutation
+    // would silently break every subsequent insight + polling request for that user.
     private val endUser: EndUser = EndUser(
         keyId = key,
         name = name,
-        customizedProperties = custom.map { (k, v) -> CustomizedProperty(k, v) },
+        customizedProperties = java.util.Collections.unmodifiableList(
+            custom.map { (k, v) -> CustomizedProperty(k, v) },
+        ),
     )
 
     internal fun toEndUser(): EndUser = endUser

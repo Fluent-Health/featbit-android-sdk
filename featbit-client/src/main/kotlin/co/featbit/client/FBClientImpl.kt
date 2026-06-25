@@ -71,9 +71,10 @@ public class FBClientImpl(
     private val insights: InsightDispatcher = InsightDispatcher(tracker, scope, logger)
 
     // When the tracker is the no-op (offline mode), every Insight we'd build is thrown away by
-    // the consumer. Short-circuit at the *call site* so we don't allocate Insight +
-    // VariationInsight + VariationData per evaluation just to discard them — that's ~3 garbage
-    // objects per flag check the JVM never has to see in offline.
+    // the consumer. Short-circuit at the *call site* so we don't allocate the wire-form chain
+    // per evaluation just to discard it — Insight + the singleton variation List wrapper +
+    // VariationInsight + VariationData = ~4 garbage objects per flag check the JVM never has
+    // to see in offline mode (the EndUser is cached on FBUser, so it doesn't add to the count).
     private val insightsEnabled: Boolean = tracker !is NoopTrackInsight
 
     // user is read on every evaluation; AtomicReference gives lock-free reads + atomic swap on identify().

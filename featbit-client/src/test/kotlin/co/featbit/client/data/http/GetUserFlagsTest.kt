@@ -125,4 +125,38 @@ class GetUserFlagsTest {
         assertFalse(response.isError)
         assertTrue(response.flags.isEmpty())
     }
+
+    /**
+     * Contract: an explicit JSON null for the `data` field is a malformed payload — server
+     * never emits this for a legitimate empty config (that case is "field absent" or
+     * `{"data": {}}`). The old AST-walking code threw on `JsonNull.jsonObject`; the typed
+     * envelope must preserve that throw-on-null surface so `safePoll` logs an error and
+     * polling retries the next interval rather than silently serving defaults forever.
+     *
+     * Distinguishing inputs:
+     *   * `{}` (field absent)      → empty flags. Tested separately. Legitimate "no config".
+     *   * `{"data": null}`         → THROWS. Malformed payload.
+     *   * `{"data": {}}`           → empty flags. Empty config object.
+     *   * `{"data": {"featureFlags": []}}` → empty flags. Empty array form.
+     *   * `{"data": "string"}`     → THROWS. Wrong type.
+     *
+     * Mutation that would fail this:
+     *   * Reverting `LatestAllEnvelope(val data: LatestAllData = LatestAllData())` to
+     *     `val data: LatestAllData? = null` — combined with the project's
+     *     `explicitNulls = false` Json config, JSON null decodes to Kotlin null and
+     *     `envelope.data?.featureFlags ?: emptyList()` silently returns empty. Empirically
+     *     confirmed: kotlinx-serialization 1.6.3 + `explicitNulls=false` coerces JSON null
+     *     to Kotlin null for nullable fields without throwing.
+     */
+    @Test
+    fun `explicit null data field throws (not silent zero flags)`() = runBlocking {
+        server.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"data": null}"""),
+        )
+        val client = newClient()
+        assertThrows(Exception::class.java) {
+            runBlocking { client.run(0) }
+        }
+        client.close()
+    }
 }

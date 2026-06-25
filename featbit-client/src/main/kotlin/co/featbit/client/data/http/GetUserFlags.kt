@@ -5,7 +5,6 @@ import co.featbit.client.model.FBUser
 import co.featbit.client.model.FeatureFlag
 import co.featbit.client.options.FBOptions
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import okhttp3.OkHttpClient
 
 /**
@@ -59,15 +58,29 @@ internal class GetUserFlags(
         // navigate → decodeFromJsonElement, allocating a full intermediate tree plus
         // re-walking it. One pass eliminates the tree allocation entirely.
         //
-        // Shape mismatch still throws (via SerializationException), caught in `safePoll`
-        // and logged. Quietly returning emptyList() would be indistinguishable from "user has
-        // no flags" and would silently serve defaults forever.
+        // Field nullability mirrors the old AST behavior exactly:
+        //   * `data` field absent       → defaults to LatestAllData() (empty flags). Matches
+        //                                 the old `?.jsonObject → null → return ok(emptyList())`.
+        //   * `data` field is JSON null → throws SerializationException because `data` is
+        //                                 non-nullable. The old code threw IllegalArgumentException
+        //                                 on `JsonNull.jsonObject`; either way `safePoll`
+        //                                 catches and logs.
+        //   * `data` wrong type         → SerializationException.
+        //   * `featureFlags` wrong type → SerializationException.
+        //
+        // Quietly returning `emptyList()` on a malformed payload would be indistinguishable
+        // from "user has no flags" and would make the SDK silently serve defaults forever —
+        // this is the exact failure mode the throw-on-malformed contract guards against.
+        //
+        // Empirical note (kotlinx-serialization 1.6.3 + `explicitNulls=false`): a nullable
+        // field WITH a null default coerces JSON null → Kotlin null without throwing. That
+        // would re-introduce the silent-empty bug. Keep `data` non-nullable.
         val envelope = json.decodeFromString(LatestAllEnvelope.serializer(), result.body)
-        return GetUserFlagsResponse.ok(envelope.data?.featureFlags ?: emptyList())
+        return GetUserFlagsResponse.ok(envelope.data.featureFlags)
     }
 
     @Serializable
-    private data class LatestAllEnvelope(val data: LatestAllData? = null)
+    private data class LatestAllEnvelope(val data: LatestAllData = LatestAllData())
 
     @Serializable
     private data class LatestAllData(val featureFlags: List<FeatureFlag> = emptyList())
