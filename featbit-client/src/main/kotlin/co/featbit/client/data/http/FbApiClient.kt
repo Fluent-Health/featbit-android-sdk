@@ -73,7 +73,16 @@ internal abstract class FbApiClient(
 
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
-        /** Shared JSON configuration matching the .NET SDK's "Web" defaults (camelCase, lenient). */
+        /**
+         * Shared JSON configuration matching the .NET SDK's "Web" defaults (camelCase, lenient).
+         *
+         * `explicitNulls = false` is marked experimental in kotlinx-serialization 1.6 — the
+         * opt-in below acknowledges that we knowingly depend on its decoding semantics
+         * (notably: JSON null on a non-nullable field with a default value throws
+         * `SerializationException`, which `GetUserFlags.LatestAllEnvelope.data` relies on to
+         * surface malformed `{"data": null}` payloads as errors instead of silently empty).
+         */
+        @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
         val json: Json = Json {
             ignoreUnknownKeys = true
             encodeDefaults = true
