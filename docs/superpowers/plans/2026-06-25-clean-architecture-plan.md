@@ -35,17 +35,19 @@ featbit-client/src/main/kotlin/co/featbit/client/
 ├── evaluation/
 │   └── EvalDetail.kt                 (public — unchanged)
 │
+├── store/
+│   └── FlagValueChangedEvent.kt      (public — STAYS; holds FlagValueChangedEvent + FlagChangeListener referenced by public FlagTracker API)
+│
 ├── domain/                            ← NEW
 │   ├── Evaluator.kt                  (was: evaluation/Evaluator.kt)
 │   ├── EvalResult.kt                 (was: evaluation/EvalResult.kt)
-│   └── ValueConverters.kt            (was: evaluation/ValueConverters.kt)
+│   ├── ValueConverters.kt            (was: evaluation/ValueConverters.kt)
+│   └── MemoryStore.kt                (was: store/MemoryStore.kt — port consumed by Evaluator)
 │
 ├── app/                               ← NEW
 │   ├── LifecycleController.kt        (was: LifecycleController.kt)
 │   ├── FlagTrackerImpl.kt            (was: changetracker/FlagTrackerImpl.kt)
-│   ├── MemoryStore.kt                (was: store/MemoryStore.kt)
-│   ├── DefaultMemoryStore.kt         (was: store/DefaultMemoryStore.kt)
-│   └── FlagValueChangedEvent.kt      (was: store/FlagValueChangedEvent.kt)
+│   └── DefaultMemoryStore.kt         (was: store/DefaultMemoryStore.kt — adapter for the domain port)
 │
 ├── data/
 │   ├── sync/                          ← NEW
@@ -180,47 +182,54 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 2: Move `LifecycleController + changetracker/FlagTrackerImpl + store/*` → `app/`
+## Task 2: Split store, move LifecycleController + FlagTrackerImpl into `app/`, MemoryStore port into `domain/`
+
+**Revised per Task 1 audit** (ports/adapters pattern):
+- `MemoryStore.kt` (interface) → `domain/` ← port; `Evaluator` already imports it
+- `DefaultMemoryStore.kt` (impl) → `app/` ← adapter
+- `FlagValueChangedEvent.kt` (contains `FlagValueChangedEvent` + `FlagChangeListener`) → **STAYS** in `store/` (public API via `FlagTracker.subscribe(FlagChangeListener)` — moving breaks consumers)
+- `LifecycleController.kt` → `app/`
+- `changetracker/FlagTrackerImpl.kt` → `app/`
 
 **Files:**
 - Move: `featbit-client/src/main/kotlin/co/featbit/client/LifecycleController.kt` → `featbit-client/src/main/kotlin/co/featbit/client/app/LifecycleController.kt`
 - Move: `featbit-client/src/main/kotlin/co/featbit/client/changetracker/FlagTrackerImpl.kt` → `featbit-client/src/main/kotlin/co/featbit/client/app/FlagTrackerImpl.kt`
-- Move: `featbit-client/src/main/kotlin/co/featbit/client/store/MemoryStore.kt` → `featbit-client/src/main/kotlin/co/featbit/client/app/MemoryStore.kt`
-- Move: `featbit-client/src/main/kotlin/co/featbit/client/store/DefaultMemoryStore.kt` → `featbit-client/src/main/kotlin/co/featbit/client/app/DefaultMemoryStore.kt`
-- Move: `featbit-client/src/main/kotlin/co/featbit/client/store/FlagValueChangedEvent.kt` → `featbit-client/src/main/kotlin/co/featbit/client/app/FlagValueChangedEvent.kt`
-- Move corresponding tests
-- Modify: any file importing `co.featbit.client.LifecycleController`, `co.featbit.client.changetracker.FlagTrackerImpl`, `co.featbit.client.store.*`
+- Move: `featbit-client/src/main/kotlin/co/featbit/client/store/MemoryStore.kt` → `featbit-client/src/main/kotlin/co/featbit/client/domain/MemoryStore.kt` *(port)*
+- Move: `featbit-client/src/main/kotlin/co/featbit/client/store/DefaultMemoryStore.kt` → `featbit-client/src/main/kotlin/co/featbit/client/app/DefaultMemoryStore.kt` *(adapter)*
+- STAYS: `featbit-client/src/main/kotlin/co/featbit/client/store/FlagValueChangedEvent.kt` (no move — public API)
+- Move tests: `LifecycleControllerTest.kt`, `FlagTrackerImplTest.kt`, `DefaultMemoryStoreTest.kt` into `app/`
 
-NOTE: `FlagTracker.kt` (public interface) stays in `changetracker/`. `FlagChangeListener` is referenced from tests — keep it discoverable. Confirm: `MemoryStore` is currently `public` (used by `FBClientImpl` parameter signatures? check before moving).
-
-- [ ] **Step 1: Verify `MemoryStore` visibility**
+- [ ] **Step 1: Verify `FlagValueChangedEvent + FlagChangeListener` are public API**
 
 ```bash
-grep -E "^public interface MemoryStore|^public class DefaultMemoryStore|^public.*FlagValueChangedEvent" featbit-client/src/main/kotlin/co/featbit/client/store/*.kt
+grep -n "FlagValueChangedEvent\|FlagChangeListener" featbit-client/src/main/kotlin/co/featbit/client/changetracker/FlagTracker.kt
 ```
-Confirm `MemoryStore` is `public` — but ONLY because of historical reasons; verify NO file outside `featbit-client/src/main/kotlin/co/featbit/client/` references it:
-```bash
-grep -rn "co.featbit.client.store.MemoryStore\|co.featbit.client.store.DefaultMemoryStore" featbit-client-android/ example-app/ 2>/dev/null
-```
-Expected: zero output. (If non-zero, this task needs a typealias bridge — but per current grep, store is internally consumed only.)
+Expected: hits referencing both as parameter / return types of public `FlagTracker.*`. Confirms `co.featbit.client.store.FlagValueChangedEvent` + `co.featbit.client.store.FlagChangeListener` FQNs must NOT move.
 
 - [ ] **Step 2: Move source + test files**
 
 ```bash
+cd /Users/deep.shah_fluentinhe/Documents/code/featbit-android-sdk/featbit-android-sdk
 mkdir -p featbit-client/src/main/kotlin/co/featbit/client/app
 mkdir -p featbit-client/src/test/kotlin/co/featbit/client/app
 
+# MemoryStore interface → domain (port)
+git mv featbit-client/src/main/kotlin/co/featbit/client/store/MemoryStore.kt \
+       featbit-client/src/main/kotlin/co/featbit/client/domain/MemoryStore.kt
+
+# DefaultMemoryStore impl → app (adapter)
+git mv featbit-client/src/main/kotlin/co/featbit/client/store/DefaultMemoryStore.kt \
+       featbit-client/src/main/kotlin/co/featbit/client/app/DefaultMemoryStore.kt
+
+# FlagValueChangedEvent STAYS — do not move
+
+# Application services → app
 git mv featbit-client/src/main/kotlin/co/featbit/client/LifecycleController.kt \
        featbit-client/src/main/kotlin/co/featbit/client/app/LifecycleController.kt
 git mv featbit-client/src/main/kotlin/co/featbit/client/changetracker/FlagTrackerImpl.kt \
        featbit-client/src/main/kotlin/co/featbit/client/app/FlagTrackerImpl.kt
-git mv featbit-client/src/main/kotlin/co/featbit/client/store/MemoryStore.kt \
-       featbit-client/src/main/kotlin/co/featbit/client/app/MemoryStore.kt
-git mv featbit-client/src/main/kotlin/co/featbit/client/store/DefaultMemoryStore.kt \
-       featbit-client/src/main/kotlin/co/featbit/client/app/DefaultMemoryStore.kt
-git mv featbit-client/src/main/kotlin/co/featbit/client/store/FlagValueChangedEvent.kt \
-       featbit-client/src/main/kotlin/co/featbit/client/app/FlagValueChangedEvent.kt
 
+# Tests
 git mv featbit-client/src/test/kotlin/co/featbit/client/LifecycleControllerTest.kt \
        featbit-client/src/test/kotlin/co/featbit/client/app/LifecycleControllerTest.kt
 git mv featbit-client/src/test/kotlin/co/featbit/client/changetracker/FlagTrackerImplTest.kt \
@@ -229,39 +238,80 @@ git mv featbit-client/src/test/kotlin/co/featbit/client/store/DefaultMemoryStore
        featbit-client/src/test/kotlin/co/featbit/client/app/DefaultMemoryStoreTest.kt
 ```
 
-- [ ] **Step 3: Update package declarations**
+- [ ] **Step 3: Update package declarations in moved files**
 
-In each moved file (5 production + 3 test = 8 files), update the package declaration:
-- `package co.featbit.client` → `package co.featbit.client.app` (LifecycleController, LifecycleControllerTest)
-- `package co.featbit.client.changetracker` → `package co.featbit.client.app` (FlagTrackerImpl, FlagTrackerImplTest)
-- `package co.featbit.client.store` → `package co.featbit.client.app` (MemoryStore, DefaultMemoryStore, FlagValueChangedEvent, DefaultMemoryStoreTest)
+Use Edit tool on each:
+- `domain/MemoryStore.kt`: `package co.featbit.client.store` → `package co.featbit.client.domain`
+- `app/DefaultMemoryStore.kt`: `package co.featbit.client.store` → `package co.featbit.client.app`
+- `app/LifecycleController.kt`: `package co.featbit.client` → `package co.featbit.client.app`
+- `app/FlagTrackerImpl.kt`: `package co.featbit.client.changetracker` → `package co.featbit.client.app`
+- `app/DefaultMemoryStoreTest.kt`: `package co.featbit.client.store` → `package co.featbit.client.app`
+- `app/LifecycleControllerTest.kt`: `package co.featbit.client` → `package co.featbit.client.app`
+- `app/FlagTrackerImplTest.kt`: `package co.featbit.client.changetracker` → `package co.featbit.client.app`
 
-- [ ] **Step 4: Update internal-store imports across remaining sources**
+`FlagValueChangedEvent.kt` (still in `store/`) unchanged.
 
-Files that import `co.featbit.client.store.*` or `co.featbit.client.LifecycleController` or `co.featbit.client.changetracker.FlagTrackerImpl`:
+- [ ] **Step 4: Update imports inside moved files**
 
-```bash
-grep -rn "import co.featbit.client.store\.\|import co.featbit.client.LifecycleController\|import co.featbit.client.changetracker.FlagTrackerImpl" featbit-client/src/main/ featbit-client/src/test/ 2>/dev/null
+These need their imports rewritten because their dependencies are now in different packages:
+
+**`domain/MemoryStore.kt`** — was `package store`. References `FeatureFlag` (was implicit same-package or imported?). Check + add `import co.featbit.client.model.FeatureFlag` if missing.
+
+**`app/DefaultMemoryStore.kt`** — was `package store`. Implements `MemoryStore` (now in `domain/`) + references `FlagChangeListener` + `FlagValueChangedEvent` (still in `store/`). Add:
+```
+import co.featbit.client.domain.MemoryStore
+import co.featbit.client.store.FlagChangeListener
+import co.featbit.client.store.FlagValueChangedEvent
 ```
 
-For each such import, change `co.featbit.client.store.<X>` → `co.featbit.client.app.<X>`, `co.featbit.client.LifecycleController` → `co.featbit.client.app.LifecycleController`, `co.featbit.client.changetracker.FlagTrackerImpl` → `co.featbit.client.app.FlagTrackerImpl`. Also update the `FlagTracker` public-interface file in `changetracker/` ONLY if it imports `FlagTrackerImpl` (it shouldn't — verify it doesn't).
+**`app/FlagTrackerImpl.kt`** — was `package changetracker`. References `MemoryStore` (now `domain/`), `FlagChangeListener` + `FlagValueChangedEvent` (still `store/`). Update imports:
+```
+import co.featbit.client.domain.MemoryStore
+import co.featbit.client.store.FlagChangeListener
+import co.featbit.client.store.FlagValueChangedEvent
+```
+
+**`app/LifecycleController.kt`** — was `package co.featbit.client`. Imports `DataSynchronizer` from `co.featbit.client.datasynchronizer` (unchanged in Task 2). No store/changetracker imports to update.
+
+**`app/DefaultMemoryStoreTest.kt`** — was `package store`. Test file. Update imports for `MemoryStore` (now domain) + `FlagChangeListener` / `FlagValueChangedEvent` (still store).
+
+**`app/FlagTrackerImplTest.kt`** — was `package changetracker`. Update similarly.
+
+**`app/LifecycleControllerTest.kt`** — was `package co.featbit.client`. References `DataSynchronizer` only — no changes.
+
+- [ ] **Step 5: Update imports in EXTERNAL callers**
+
+```bash
+grep -rn "import co.featbit.client.store\.MemoryStore\|import co.featbit.client.LifecycleController$\|import co.featbit.client.changetracker.FlagTrackerImpl" featbit-client/src/ 2>/dev/null
+```
+
+For each match:
+- `co.featbit.client.store.MemoryStore` → `co.featbit.client.domain.MemoryStore`
+- `co.featbit.client.LifecycleController` → `co.featbit.client.app.LifecycleController`
+- `co.featbit.client.changetracker.FlagTrackerImpl` → `co.featbit.client.app.FlagTrackerImpl`
+- `co.featbit.client.store.DefaultMemoryStore` → `co.featbit.client.app.DefaultMemoryStore` (if any)
 
 Known callers (verified upfront):
 - `FBClientImpl.kt` — imports `LifecycleController`, `FlagTrackerImpl`, `MemoryStore`, `DefaultMemoryStore`.
-- `FlagTrackerImpl.kt` (just moved) — imports `MemoryStore`, `FlagChangeListener`, `FlagValueChangedEvent` (now all in `app/`, same package — drop the imports entirely).
-- `DefaultMemoryStore.kt` — references `FlagChangeListener` + `FlagValueChangedEvent` (same package now, drop imports).
-- Polling/StreamingDataSynchronizer — import `co.featbit.client.store.MemoryStore`.
-- All test files that reference store/lifecycle/tracker.
+- `domain/Evaluator.kt` — imports `co.featbit.client.store.MemoryStore` (from Task 1). Update to `co.featbit.client.domain.MemoryStore`.
+- `data.sync/PollingDataSynchronizer.kt` / `StreamingDataSynchronizer.kt` (still in `datasynchronizer/` at this point, see file path) — import `co.featbit.client.store.MemoryStore`. Update to `domain.MemoryStore`.
 
-- [ ] **Step 5: Verify no stale references**
+Note: `FlagValueChangedEvent` + `FlagChangeListener` imports STAY at `co.featbit.client.store.*` — don't rewrite those.
+
+- [ ] **Step 6: Verify no stale references**
 
 ```bash
-grep -rn "co.featbit.client.store\.\|^import co.featbit.client.LifecycleController$" featbit-client/src/ 2>/dev/null
-grep -rn "co.featbit.client.changetracker.FlagTrackerImpl" featbit-client/src/ 2>/dev/null
+grep -rn "co.featbit.client.store\.MemoryStore\|co.featbit.client.store\.DefaultMemoryStore" featbit-client/src/ 2>/dev/null
+grep -rn "^import co.featbit.client.LifecycleController$\|co.featbit.client.changetracker.FlagTrackerImpl" featbit-client/src/ 2>/dev/null
 ```
-Expected: zero output.
+Expected: zero output for both greps.
 
-- [ ] **Step 6: Run gates**
+```bash
+grep -rn "co.featbit.client.store.FlagValueChangedEvent\|co.featbit.client.store.FlagChangeListener" featbit-client/src/ 2>/dev/null
+```
+Expected: SOME output — these stay in `store/` (public API). Confirms public API FQN preserved.
+
+- [ ] **Step 7: Run gates**
 
 ```bash
 ./gradlew :featbit-client:compileDebugKotlin
@@ -270,16 +320,25 @@ Expected: zero output.
 ```
 Expected: all green, 98 pass / 0 fail / 2 e2e-skipped.
 
-- [ ] **Step 7: Audit + commit**
+- [ ] **Step 8: Audit + commit**
 
-Dispatch cavecrew-reviewer. Then:
+Dispatch a code-reviewer agent with stance: "ports/adapters integrity" or "lifecycle of MemoryStore now that interface + impl live in different packages". Avoid same audit prompt as Task 1.
 
 ```bash
 git add -A
-git commit -m "refactor: move LifecycleController + FlagTrackerImpl + store into app/
+git commit -m "refactor: split MemoryStore into domain port + app adapter
 
-Application-services layer holds orchestration helpers and in-memory
-state. Public FlagTracker interface stays in changetracker/ (consumer FQN).
+MemoryStore (interface) → domain/ as the port consumed by Evaluator.
+DefaultMemoryStore (impl) → app/ as the adapter. FlagValueChangedEvent
++ FlagChangeListener stay in store/ — they are public API via
+FlagTracker.subscribe(FlagChangeListener).
+
+LifecycleController + FlagTrackerImpl move into app/ as application
+services.
+
+Closes the domain→app reverse arrow surfaced by Task 1 audit
+(domain.Evaluator imported store.MemoryStore; would have become
+domain→app once store/ moved into app/).
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```
@@ -553,7 +612,14 @@ for d in featbit-client/src/main/kotlin/co/featbit/client/changetracker \
 done
 ```
 
-NOTE: `changetracker/` keeps `FlagTracker.kt` (public interface). `model/` keeps `FBUser.kt` + `FeatureFlag.kt`. `evaluation/` keeps `EvalDetail.kt`. Do NOT remove those directories.
+NOTE: Directories that survive (do NOT remove):
+- `changetracker/` keeps `FlagTracker.kt` (public interface)
+- `model/` keeps `FBUser.kt` + `FeatureFlag.kt`
+- `evaluation/` keeps `EvalDetail.kt`
+- `store/` keeps `FlagValueChangedEvent.kt` (which contains `FlagValueChangedEvent` + `FlagChangeListener`, both public via `FlagTracker`)
+- `options/` keeps `FBOptions.kt` + `DataSyncMode.kt`
+
+The `rmdir` loop above is safe — it skips non-empty dirs.
 
 - [ ] **Step 2: Verify the final target layout**
 

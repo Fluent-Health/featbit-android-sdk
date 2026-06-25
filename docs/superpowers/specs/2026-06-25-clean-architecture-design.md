@@ -65,8 +65,8 @@ co.featbit.client.wire/       (kotlinx-serialization DTOs only)
 
 ### Why these names
 
-- **`domain`**: zero external dependencies. Could move to its own pure-JVM module later (Option C from brainstorm).
-- **`app`**: holds application services that compose domain + ports. `LifecycleController` is an app concern (Android-lifecycle-shaped, but interface-only). `FlagTrackerImpl` is an app service over `MemoryStore`. The store + listeners belong here because they're application state, not data adapters.
+- **`domain`**: pure types and the `MemoryStore` port (interface). Stays free of Android / OkHttp / app / data / wire deps. **Known carve-out:** `domain.EvalResult.Found` wraps `model.FeatureFlag`, which is `@Serializable` for wire-compat. We accept the transitive `kotlinx-serialization` reference here because moving `FeatureFlag` would break the public `FBClient.allFlags()` return type. A future refactor could split `FeatureFlag` into a pure-domain core + a wire DTO — out of scope here.
+- **`app`**: holds application services + the `MemoryStore` adapter. `DefaultMemoryStore` lives here (concrete impl of the domain port). `LifecycleController` + `FlagTrackerImpl` are app services. `FlagValueChangedEvent` + `FlagChangeListener` stay in `store/` because they're part of the public `FlagTracker` API surface.
 - **`data.sync`**, **`data.http`**, **`data.insights`**: each is one concrete adapter family. Replaces the `internal/` junk drawer.
 - **`wire`**: kotlinx-serialization DTOs. They are NOT domain models — they are the on-wire format. Separating them prevents future refactors from accidentally letting `@Serializable` annotations creep into domain types.
 
@@ -75,11 +75,23 @@ co.featbit.client.wire/       (kotlinx-serialization DTOs only)
 ```
 data.* → app → domain
 data.* → wire
-app → domain
-PUBLIC (root) → app, domain, data.*  (the orchestration glue)
+app → domain (interface + types)
+PUBLIC (root) → app, domain, data.*  (orchestration glue)
+PUBLIC store/ → (nothing in this refactor — pure data types)
 ```
 
-No `domain` → anything; no `app` → `data.*`; no `wire` → `domain`. Enforced by code review (no Gradle-level boundary yet — that's Option C).
+No `domain` → `app` / `data.*` / `wire`. No `app` → `data.*`. No `wire` → `domain`. Enforced by code review (no Gradle-level boundary yet).
+
+### `MemoryStore` as a port (ports/adapters)
+
+Issue surfaced by Task 1 audit: `Evaluator` (now in `domain/`) imports `MemoryStore`. If `MemoryStore` moves to `app/`, the dependency arrow becomes `domain → app` — a rule violation.
+
+Resolution: **`MemoryStore` (interface) lives in `domain/` as a port. `DefaultMemoryStore` (impl) lives in `app/` as the adapter.** This is hexagonal architecture as the textbook intends. `Evaluator` depends on the domain port; the implementation is injected.
+
+Single-file pair split:
+- `domain/MemoryStore.kt` — interface (was `store/MemoryStore.kt`).
+- `app/DefaultMemoryStore.kt` — impl (was `store/DefaultMemoryStore.kt`).
+- `store/FlagValueChangedEvent.kt` — STAYS (public API; referenced by `FlagTracker.subscribe(FlagChangeListener)`). Contains both `FlagValueChangedEvent` data class and `FlagChangeListener` fun interface.
 
 ## File-by-file move plan
 
@@ -94,9 +106,9 @@ Internal moves:
 | `evaluation/ValueConverters.kt` | `domain/ValueConverters.kt` |
 | `LifecycleController.kt` | `app/LifecycleController.kt` |
 | `changetracker/FlagTrackerImpl.kt` | `app/FlagTrackerImpl.kt` |
-| `store/MemoryStore.kt` | `app/MemoryStore.kt` |
-| `store/DefaultMemoryStore.kt` | `app/DefaultMemoryStore.kt` |
-| `store/FlagValueChangedEvent.kt` | `app/FlagValueChangedEvent.kt` |
+| `store/MemoryStore.kt` | `domain/MemoryStore.kt` *(port — used by `Evaluator`)* |
+| `store/DefaultMemoryStore.kt` | `app/DefaultMemoryStore.kt` *(adapter)* |
+| `store/FlagValueChangedEvent.kt` | **STAYS** at `store/FlagValueChangedEvent.kt` *(public API via `FlagTracker`)* |
 | `datasynchronizer/*` | `data/sync/*` |
 | `internal/FbApiClient.kt` | `data/http/FbApiClient.kt` |
 | `internal/FBEndpoints.kt` | `data/http/FBEndpoints.kt` |
