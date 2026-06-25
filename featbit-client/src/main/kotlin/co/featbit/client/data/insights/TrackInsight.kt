@@ -5,6 +5,7 @@ import co.featbit.client.data.http.FbApiClient
 import co.featbit.client.wire.Insight
 import co.featbit.client.options.FBOptions
 import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
 import okhttp3.OkHttpClient
 
@@ -38,7 +39,7 @@ internal class HttpTrackInsight(
         if (batch.isEmpty()) return
         try {
             val payload = json
-                .encodeToString(ListSerializer(Insight.serializer()), batch)
+                .encodeToString(INSIGHT_LIST_SERIALIZER, batch)
                 .encodeToByteArray()
             post(endpoint, payload)
         } catch (ce: CancellationException) {
@@ -46,5 +47,12 @@ internal class HttpTrackInsight(
         } catch (ex: Exception) {
             logger.error("Exception occurred while tracking insight.", ex)
         }
+    }
+
+    private companion object {
+        // ListSerializer wraps an element serializer; building one per send is pure overhead
+        // since the type never changes. Cache the singleton.
+        private val INSIGHT_LIST_SERIALIZER: KSerializer<List<Insight>> =
+            ListSerializer(Insight.serializer())
     }
 }

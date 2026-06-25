@@ -4,10 +4,8 @@ import co.featbit.client.wire.EndUser
 import co.featbit.client.model.FBUser
 import co.featbit.client.model.FeatureFlag
 import co.featbit.client.options.FBOptions
-import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
 import okhttp3.OkHttpClient
 
 /**
@@ -56,14 +54,21 @@ internal class GetUserFlags(
             return GetUserFlagsResponse.ok(emptyList())
         }
 
-        // Wire shape: `{"data": {"featureFlags": [...]}}`. We let `.jsonObject` / `.jsonArray`
-        // throw on a shape mismatch — `safePoll` catches and logs it as an error. Quietly
-        // returning `emptyList()` on a malformed payload would be indistinguishable from
-        // "user has no flags" and would silently serve defaults forever.
-        val data = json.parseToJsonElement(result.body).jsonObject["data"]?.jsonObject
-        val featureFlagsArr = data?.get("featureFlags")?.jsonArray ?: return GetUserFlagsResponse.ok(emptyList())
-        val featureFlags = json.decodeFromJsonElement(ListSerializer(FeatureFlag.serializer()), featureFlagsArr)
-
-        return GetUserFlagsResponse.ok(featureFlags)
+        // Wire shape: `{"data": {"featureFlags": [...]}}`. We deserialize through a typed
+        // envelope in a single pass — the prior implementation went body → JsonElement AST →
+        // navigate → decodeFromJsonElement, allocating a full intermediate tree plus
+        // re-walking it. One pass eliminates the tree allocation entirely.
+        //
+        // Shape mismatch still throws (via SerializationException), caught in `safePoll`
+        // and logged. Quietly returning emptyList() would be indistinguishable from "user has
+        // no flags" and would silently serve defaults forever.
+        val envelope = json.decodeFromString(LatestAllEnvelope.serializer(), result.body)
+        return GetUserFlagsResponse.ok(envelope.data?.featureFlags ?: emptyList())
     }
+
+    @Serializable
+    private data class LatestAllEnvelope(val data: LatestAllData? = null)
+
+    @Serializable
+    private data class LatestAllData(val featureFlags: List<FeatureFlag> = emptyList())
 }

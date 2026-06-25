@@ -11,9 +11,15 @@ internal typealias ValueConverter<T> = (String) -> T?
 
 internal object ValueConverters {
     val bool: ValueConverter<Boolean> = { value ->
-        when (value.trim().lowercase()) {
-            "true" -> true
-            "false" -> false
+        // `value.trim().lowercase()` allocated two strings per check — `lowercase()`
+        // unconditionally allocates when there is any uppercase letter. `equals(_, ignoreCase=true)`
+        // compares without allocating, and the prior `trim()` handled exterior whitespace
+        // which we keep with a single trim call. For clean server data both branches are O(1)
+        // string comparisons.
+        val trimmed = value.trim()
+        when {
+            trimmed.equals("true", ignoreCase = true) -> true
+            trimmed.equals("false", ignoreCase = true) -> false
             else -> null
         }
     }
