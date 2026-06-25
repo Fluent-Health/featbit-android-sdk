@@ -190,55 +190,78 @@ coroutine — no per-evaluation `launch`.
 
 ## Module / package layout
 
+Layered after the 2026-06-25 clean-architecture refactor. Public API FQNs are unchanged — types that were public still live at their original packages.
+
 ```
 featbit-client/
 └── src/main/kotlin/co/featbit/client/
     ├── FBClient.kt                  public API surface
-    ├── FBClientImpl.kt              orchestration (this is the wiring hub)
+    ├── FBClientImpl.kt              orchestration (the wiring hub)
     ├── FBLogger.kt / DefaultLogger.kt
-    ├── LifecycleController.kt       foreground/online state machine
+    │
     ├── changetracker/
-    │   ├── FlagTracker.kt           public subscription API
-    │   └── FlagTrackerImpl.kt       fans events to subscribers + SharedFlow
-    ├── datasynchronizer/
-    │   ├── DataSynchronizer.kt      interface (start/pause/resume/close)
-    │   ├── NullDataSynchronizer.kt  offline / no-op
-    │   ├── PollingDataSynchronizer.kt
-    │   └── StreamingDataSynchronizer.kt
+    │   └── FlagTracker.kt           public subscription API
+    │
     ├── evaluation/
-    │   ├── EvalDetail.kt            public result with reason
-    │   ├── EvalResult.kt            internal sealed result (Found | NotFound)
-    │   ├── Evaluator.kt
-    │   └── ValueConverters.kt       string → bool/int/float/double/string
-    ├── internal/
-    │   ├── FbApiClient.kt           OkHttp base (auth, JSON, POST)
-    │   ├── FBEndpoints.kt           one source of truth for URLs
-    │   ├── HttpConstants.kt
-    │   ├── ConnectionToken.kt       streaming auth encoder
-    │   ├── GetUserFlags.kt          polling endpoint client
-    │   ├── TrackInsight.kt          insight endpoint client
-    │   └── InsightDispatcher.kt     bounded queue + batch flush
+    │   └── EvalDetail.kt            public result with reason
+    │
     ├── model/
     │   ├── FBUser.kt                public builder
-    │   ├── EndUser.kt               wire format
-    │   ├── FeatureFlag.kt
-    │   └── Insight.kt               analytics payloads
+    │   └── FeatureFlag.kt           public flag value type
+    │
     ├── options/
     │   ├── DataSyncMode.kt
     │   └── FBOptions.kt
-    └── store/
-        ├── FlagValueChangedEvent.kt
-        ├── MemoryStore.kt           public interface
-        └── DefaultMemoryStore.kt
+    │
+    ├── store/
+    │   └── FlagValueChangedEvent.kt FlagValueChangedEvent + FlagChangeListener (public, via FlagTracker)
+    │
+    ├── domain/                      pure Kotlin, no framework deps
+    │   ├── Evaluator.kt
+    │   ├── EvalResult.kt            internal sealed result (Found | NotFound)
+    │   ├── ValueConverters.kt       string → bool/int/float/double/string
+    │   └── MemoryStore.kt           port consumed by Evaluator
+    │
+    ├── app/                         application services + ports adapters
+    │   ├── LifecycleController.kt   foreground/online state machine
+    │   ├── FlagTrackerImpl.kt       fans events to subscribers via SharedFlow
+    │   └── DefaultMemoryStore.kt    adapter for domain.MemoryStore
+    │
+    ├── data/                        adapters that talk to the outside world
+    │   ├── http/
+    │   │   ├── FbApiClient.kt       OkHttp base (auth, JSON, POST)
+    │   │   ├── FBEndpoints.kt       one source of truth for URLs
+    │   │   ├── HttpConstants.kt
+    │   │   ├── ConnectionToken.kt   streaming auth encoder
+    │   │   └── GetUserFlags.kt      polling endpoint client
+    │   ├── sync/
+    │   │   ├── DataSynchronizer.kt  interface (start/pause/resume/close)
+    │   │   ├── NullDataSynchronizer.kt offline / no-op
+    │   │   ├── PollingDataSynchronizer.kt
+    │   │   └── StreamingDataSynchronizer.kt
+    │   └── insights/
+    │       ├── TrackInsight.kt      insight endpoint client
+    │       └── InsightDispatcher.kt bounded queue + batch flush
+    │
+    └── wire/                        kotlinx-serialization DTOs
+        ├── EndUser.kt               wire format for FBUser (+ CustomizedProperty)
+        └── Insight.kt               analytics payloads (+ VariationInsight, VariationData)
 ```
+
+**Dependency rule:** `domain → (nothing)`, `app → domain`, `data.* → domain + wire`, `wire → model` (factories). Public API (root + `changetracker/`, `evaluation/`, `model/`, `options/`, `store/`) is consumed by everyone.
+
+**Known carve-outs (intentional rule relaxations):**
+- `model.FeatureFlag` is `@Serializable` even though it lives in the public API surface. Splitting it into pure-domain core + wire DTO would force a public-API break (`FBClient.allFlags()` return type). Accepted; revisit in a v2 major.
+- `app.LifecycleController` imports `data.sync.DataSynchronizer` (the interface). LifecycleController orchestrates the synchronizer lifecycle, so it must reference the contract. The strict reading of "app → data.*" is violated here; the practical justification is that `DataSynchronizer` is a port the app *consumes* rather than an adapter the app *depends on by category*. A future cleanup could promote the interface to `app/` and leave the concrete impls in `data/sync/` — out of scope for this refactor.
+- `domain.MemoryStore` + `app.DefaultMemoryStore` are `public` rather than `internal`. They were already public on `main` before this refactor; narrowing their visibility now would break SDK consumers that reference them. Visibility is preserved on principle (no API changes in this refactor).
 
 ## Pointers for common changes
 
 | Change                                       | Start here                                              |
 |----------------------------------------------|---------------------------------------------------------|
-| Add an HTTP endpoint                         | `internal/FBEndpoints.kt` + `internal/HttpConstants.kt` |
-| Add a new sync strategy                      | implement `DataSynchronizer`, register in `FBClientImpl.newDataSynchronizer` |
-| Add a new variation type                     | `evaluation/ValueConverters.kt` + matching method on `FBClient` |
-| Tune insight batching / backpressure         | `internal/InsightDispatcher.kt` constructor defaults    |
+| Add an HTTP endpoint                         | `data/http/FBEndpoints.kt` + `data/http/HttpConstants.kt` |
+| Add a new sync strategy                      | implement `data/sync/DataSynchronizer`, register in `FBClientImpl.newDataSynchronizer` |
+| Add a new variation type                     | `domain/ValueConverters.kt` + matching method on `FBClient` |
+| Tune insight batching / backpressure         | `data/insights/InsightDispatcher.kt` constructor defaults |
 | Tune lifecycle debounce                      | `FBOptions.Builder.backgroundGracePeriod`               |
-| Change wire format for evaluation payload    | `model/EndUser.kt` + `model/FBUser.kt`                  |
+| Change wire format for evaluation payload    | `wire/EndUser.kt` + `model/FBUser.kt`                   |
