@@ -4,10 +4,14 @@ import co.featbit.client.model.FBUser
 import co.featbit.client.model.FeatureFlag
 import co.featbit.client.options.FBOptions
 import kotlinx.coroutines.runBlocking
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 class FBClientImplTest {
 
@@ -87,5 +91,266 @@ class FBClientImplTest {
         assertEquals(setOf("a", "b"), all.keys)
         assertEquals("1", all["a"]?.variation)
         client.close()
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // identify / close contract tests (wider-scope audit H5)
+    // ---------------------------------------------------------------------------------------
+
+    /**
+     * Contract: `identify(user)` must swap the synchronizer and re-fetch flags. After identify
+     * resolves, evaluation reflects the NEW user's payload, not the initial user's.
+     *
+     * Drives `FBClientImpl` in polling mode against `MockWebServer` — proves the swap end-to-end
+     * (closeAndJoin of previous sync, fresh sync starts, server is asked for new user's flags,
+     * store is updated, evaluation sees the update).
+     *
+     * Mutation that would fail this:
+     *   * `identify` not setting `syncRef = fresh`.
+     *   * `identify` re-using the old synchronizer (would never re-fetch).
+     *   * `closeAndJoin` clearing the store mid-swap.
+     *   * `identify` returning before the new sync's first response landed.
+     */
+    @Test
+    fun `identify swaps synchronizer and evaluation reflects new user payload`() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        try {
+            // First user gets "alpha"; second user gets "beta". Polling interval is huge so the
+            // *only* time the SDK hits the server for each user is its initial fetch.
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody(
+                    """{"data":{"featureFlags":[{"id":"f","variation":"alpha","matchReason":"fallthrough"}]}}""",
+                ),
+            )
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody(
+                    """{"data":{"featureFlags":[{"id":"f","variation":"beta","matchReason":"fallthrough"}]}}""",
+                ),
+            )
+
+            val options = FBOptions.Builder("secret")
+                .polling(server.url("/").toString(), interval = 10.seconds)
+                .event(server.url("/").toString())
+                .build()
+            val client = FBClientImpl(options, FBUser.builder("user-A").build())
+
+            try {
+                assertTrue("initial start should succeed", client.start(timeout = 5.seconds))
+                assertEquals(
+                    "user-A evaluation must reflect server's 'alpha' payload",
+                    "alpha",
+                    client.stringVariation("f", default = "fallback"),
+                )
+
+                assertTrue(
+                    "identify should succeed within timeout",
+                    client.identify(FBUser.builder("user-B").build(), timeout = 5.seconds),
+                )
+
+                assertEquals(
+                    "after identify, evaluation must reflect user-B's 'beta' payload",
+                    "beta",
+                    client.stringVariation("f", default = "fallback"),
+                )
+            } finally {
+                client.close()
+            }
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    /**
+     * Contract: `close()` is idempotent. The public `Closeable.close` contract permits multiple
+     * calls; the SDK must not crash, hang, or throw on a second close. This pins the runBlocking
+     * + per-phase withTimeoutOrNull pattern's stability under double-invocation.
+     *
+     * For an offline client (NoopTrackInsight + NullDataSynchronizer + already-cancelled scope
+     * after the first close), the second close should be microsecond-scale. A 50ms threshold
+     * is generous enough to absorb GC pause / CI noise but tight enough to catch any mutation
+     * where the second close suspends on a phantom timeout or stuck channel.close().
+     *
+     * Mutation that would fail this:
+     *   * Removing the `withTimeoutOrNull` wrappers and letting a cancelled scope's
+     *     `closeAndJoin`/`closeAndDrain` throw on the second call.
+     *   * Any second-close path that suspends for >50ms (e.g. waiting on a timeout that
+     *     never resolves because the scope is already cancelled).
+     */
+    @Test
+    fun `close is idempotent`() {
+        val client = offlineClientWith(FeatureFlag(id = "f", variation = "v"))
+        client.close()
+        val startNs = System.nanoTime()
+        client.close()
+        val elapsedMs = (System.nanoTime() - startNs) / 1_000_000
+        assertTrue(
+            "second close must return promptly (got ${elapsedMs}ms, expected < 50ms)",
+            elapsedMs < 50,
+        )
+    }
+
+    /**
+     * Contract: `close()` on an offline client (no network, no in-flight sync) returns promptly.
+     * Pins the lower bound of the close budget — proves the runBlocking{} bridge isn't
+     * waiting on a timeout that never fires when there's nothing to wait for.
+     *
+     * Mutation that would fail this:
+     *   * `close()` blocking on a sleep, indefinite wait, or wrong condition.
+     *   * `runBlocking { ... }` body waiting on a never-resolving deferred.
+     */
+    @Test
+    fun `close completes promptly when offline`() {
+        val client = offlineClientWith(FeatureFlag(id = "f", variation = "v"))
+        val startNs = System.nanoTime()
+        client.close()
+        val elapsedMs = (System.nanoTime() - startNs) / 1_000_000
+        assertTrue(
+            "offline close must return well under the per-phase 2s budgets (got ${elapsedMs}ms)",
+            elapsedMs < 500,
+        )
+    }
+
+    /**
+     * Contract: when the sync teardown can't make progress (e.g. polling sync is blocked in
+     * a non-responsive socket read), `close()` is bounded by `SYNC_CLOSE_TIMEOUT_MS = 2_000ms`
+     * — the per-phase budget set in `FBClientImpl.close()`. Without that budget, `close` would
+     * hang until OkHttp's 8s readTimeout fires (`FbApiClient.READ_TIMEOUT_SECONDS`).
+     *
+     * Setup: MockWebServer accepts the socket but never enqueues a response. PollingSync's
+     * first poll blocks in OkHttp's synchronous `socket.read`. `cancelAndJoin` can't preempt
+     * that read until readTimeout — so the outer `withTimeoutOrNull(2_000ms)` is the only
+     * thing keeping `close()` bounded.
+     *
+     * Mutation that would fail this:
+     *   * Removing or extending `SYNC_CLOSE_TIMEOUT_MS` above ~3s.
+     *   * Removing the outer `withTimeoutOrNull(SYNC_CLOSE_TIMEOUT_MS) { ... }` wrapper —
+     *     close would hang until OkHttp's 8s readTimeout.
+     */
+    @Test
+    fun `close is bounded when sync teardown is blocked on a non-responsive server`() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        try {
+            // No enqueued responses — the polling sync's first request will block in
+            // OkHttp's read until either cancellation cuts through or the 8s readTimeout fires.
+            val options = FBOptions.Builder("secret")
+                .polling(server.url("/").toString(), interval = 10.seconds)
+                .event(server.url("/").toString())
+                .build()
+            val client = FBClientImpl(options, FBUser.builder("u1").build())
+
+            // Kick off start() with a short timeout so the polling sync issues its first request
+            // (which blocks in OkHttp's read since the server has no enqueued responses), then
+            // measure close(). start() itself returns false on the 200ms timeout; that's fine —
+            // we just need the polling loop to have begun a real HTTP call before we close.
+            client.start(timeout = 200.milliseconds)
+
+            val startNs = System.nanoTime()
+            client.close()
+            val elapsedMs = (System.nanoTime() - startNs) / 1_000_000
+
+            // 2_500ms = SYNC_CLOSE_TIMEOUT_MS (2_000) + ~500ms CI slack (measured ~2.2s on
+            // local). A mutation that extended the constant past ~2.5s would fail here; a
+            // mutation that removed the outer withTimeoutOrNull would hit OkHttp's 8s
+            // readTimeout. The tight bound is intentional — looser thresholds let a 50%+
+            // drift in the constant pass silently.
+            assertTrue(
+                "close must be bounded by SYNC_CLOSE_TIMEOUT_MS=2s + slack, not by OkHttp's " +
+                    "8s readTimeout (got ${elapsedMs}ms)",
+                elapsedMs < 2_500,
+            )
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    /**
+     * Contract: after `close()`, `initialized` continues to reflect the last-known state and
+     * evaluations return defaults / fall back via `client not ready` if the synchronizer was
+     * never initialized. The store contents survive — close does NOT wipe data.
+     *
+     * Mutation that would fail this:
+     *   * `close()` clearing the store.
+     *   * `close()` flipping `initialized` back to false in a way that breaks the bootstrap path.
+     */
+    @Test
+    fun `close preserves store and bootstrap evaluations still work`() = runBlocking {
+        val client = offlineClientWith(FeatureFlag(id = "f", variation = "true"))
+        assertTrue(client.start())
+        assertTrue("bootstrap flag evaluates before close", client.boolVariation("f"))
+
+        client.close()
+
+        // The store survived; bootstrap-backed evaluation still resolves. Note this is the
+        // contract for the offline+bootstrap path — a non-bootstrap client may behave
+        // differently post-close depending on whether the network sync ever completed.
+        assertTrue("bootstrap flag still evaluates after close", client.boolVariation("f"))
+    }
+
+    /**
+     * Contract: `identify` on an offline client with bootstrap returns `true` (NullDataSync's
+     * `start()` is vacuously successful). User swap is recorded internally even when no
+     * network call happens.
+     *
+     * Mutation that would fail this:
+     *   * `identify` swapping in a synchronizer that reports `initialized=false` for offline.
+     *   * `NullDataSynchronizer.start()` returning `false`.
+     */
+    @Test
+    fun `offline identify returns true without network`() = runBlocking {
+        val client = offlineClientWith(FeatureFlag(id = "f", variation = "true"))
+        assertTrue(client.start())
+        assertTrue(
+            "offline identify must succeed (NullDataSynchronizer.start = true)",
+            client.identify(FBUser.builder("u2").build(), timeout = 1.seconds),
+        )
+        assertTrue("client remains initialized after offline identify", client.initialized)
+        client.close()
+    }
+
+    /**
+     * Contract: `start(timeout)` must return `false` (not throw) when the synchronizer fails to
+     * initialize within the budget. The current code uses `withTimeoutOrNull` which returns
+     * `null` -> coerced to `false`. This pins that behavior — a regression that threw or hung
+     * here would break user-facing start() semantics.
+     *
+     * Mutation that would fail this:
+     *   * Replacing `withTimeoutOrNull` with `withTimeout` (would throw).
+     *   * `withTimeoutOrNull` body suppressing the timeout (would hang).
+     */
+    @Test
+    fun `start returns false when polling sync cannot initialize within timeout`() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        try {
+            // Never enqueue a response — the polling call will hang until the test's start()
+            // timeout, at which point start() should return false rather than throw.
+            val options = FBOptions.Builder("secret")
+                .polling(server.url("/").toString(), interval = 10.seconds)
+                .event(server.url("/").toString())
+                .build()
+            val client = FBClientImpl(options, FBUser.builder("u1").build())
+            try {
+                val startNs = System.nanoTime()
+                val started = client.start(timeout = 200.milliseconds)
+                val elapsedMs = (System.nanoTime() - startNs) / 1_000_000
+
+                assertFalse("start must return false on timeout, not throw", started)
+                assertFalse(
+                    "initialized must remain false after failed start — catches mutations that " +
+                        "flip the flag on timeout",
+                    client.initialized,
+                )
+                assertTrue(
+                    "start respects the timeout (got ${elapsedMs}ms, expected ~200ms + slack)",
+                    elapsedMs in 100..2_000,
+                )
+            } finally {
+                client.close()
+            }
+        } finally {
+            server.shutdown()
+        }
     }
 }
