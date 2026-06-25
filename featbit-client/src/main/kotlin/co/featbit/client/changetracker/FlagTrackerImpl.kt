@@ -32,9 +32,27 @@ internal class FlagTrackerImpl(
     }
 
     private fun dispatch(event: FlagValueChangedEvent) {
-        subscribers.forEach { it.onChange(event) }
-        keyedSubscribers[event.key]?.forEach { it.onChange(event) }
+        // Each subscriber callback is isolated in its own try/catch so a single throwing
+        // subscriber cannot starve subsequent subscribers from receiving the event. Without
+        // this, `CopyOnWriteArrayList.forEach` halts on the first exception — silently losing
+        // delivery to every later-registered subscriber for that event. That's a data-loss
+        // bug for a callback-style API where one consumer can't be allowed to break others.
+        subscribers.forEach { safeNotify(it, event) }
+        keyedSubscribers[event.key]?.forEach { safeNotify(it, event) }
         _flagChanges.tryEmit(event)
+    }
+
+    private fun safeNotify(listener: FlagChangeListener, event: FlagValueChangedEvent) {
+        try {
+            listener.onChange(event)
+        } catch (t: Throwable) {
+            // No injected logger here; fall back to stderr like `DefaultLogger.write` does
+            // when android.util.Log isn't available. Swallow the throw so iteration continues.
+            System.err.println(
+                "[FeatBit] FlagTracker subscriber threw for event ${event.key}: ${t.message}",
+            )
+            t.printStackTrace(System.err)
+        }
     }
 
     override fun subscribe(listener: FlagChangeListener) {
