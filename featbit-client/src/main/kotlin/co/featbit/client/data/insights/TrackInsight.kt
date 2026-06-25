@@ -1,4 +1,4 @@
-package co.featbit.client.internal
+package co.featbit.client.data.insights
 
 import co.featbit.client.data.http.FBEndpoints
 import co.featbit.client.data.http.FbApiClient

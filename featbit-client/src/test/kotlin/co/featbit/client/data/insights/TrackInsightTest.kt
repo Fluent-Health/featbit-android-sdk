@@ -1,4 +1,4 @@
-package co.featbit.client.internal
+package co.featbit.client.data.insights
 
 import co.featbit.client.model.FBUser
 import co.featbit.client.model.FeatureFlag

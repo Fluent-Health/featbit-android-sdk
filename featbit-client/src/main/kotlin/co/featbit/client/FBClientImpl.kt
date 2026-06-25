@@ -15,10 +15,10 @@ import co.featbit.client.domain.ValueConverter
 import co.featbit.client.domain.ValueConverters
 import co.featbit.client.evaluation.EvalDetail
 import co.featbit.client.data.http.FBEndpoints
-import co.featbit.client.internal.HttpTrackInsight
-import co.featbit.client.internal.InsightDispatcher
-import co.featbit.client.internal.NoopTrackInsight
-import co.featbit.client.internal.TrackInsight
+import co.featbit.client.data.insights.HttpTrackInsight
+import co.featbit.client.data.insights.InsightDispatcher
+import co.featbit.client.data.insights.NoopTrackInsight
+import co.featbit.client.data.insights.TrackInsight
 import co.featbit.client.model.FBUser
 import co.featbit.client.model.FeatureFlag
 import co.featbit.client.model.Insight
