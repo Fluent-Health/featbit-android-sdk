@@ -16,16 +16,40 @@ servers. For server-side use, see FeatBit's server SDKs.
 
 ### Installation
 
-Add the dependency (coordinates depend on where you publish it):
+Artifacts are built on demand by [JitPack](https://jitpack.io) whenever a consumer
+requests a git tag from this repository, so no separate publish step is needed.
+
+Add the JitPack repository in `settings.gradle.kts`:
 
 ```kotlin
-dependencies {
-    implementation("co.featbit:featbit-client:<version>")
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+        maven { url = uri("https://jitpack.io") }
+    }
 }
 ```
 
+Then depend on either the core SDK or, on Android, the optional lifecycle connector:
+
+```kotlin
+dependencies {
+    // Core SDK — flag evaluation, polling, streaming, event tracking.
+    implementation("com.github.Fluent-Health.featbit-android-sdk:featbit-client:<tag>")
+
+    // Optional: Android lifecycle glue. Depends on the core SDK transitively.
+    implementation("com.github.Fluent-Health.featbit-android-sdk:featbit-client-android:<tag>")
+}
+```
+
+Replace `<tag>` with a released git tag (e.g. `v0.1.0`). JitPack pins the artifact to the
+exact commit that tag points at, so the version you see is the version you get.
+
 The library requires `minSdk 21` and the `INTERNET` permission (declared by the library
 manifest and merged automatically).
+
+Groovy DSL is identical apart from the string form:
+`implementation 'com.github.Fluent-Health.featbit-android-sdk:featbit-client:<tag>'`.
 
 ### Prerequisite
 
