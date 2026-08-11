@@ -1,5 +1,8 @@
 package co.featbit.client.model
 
+import co.featbit.client.wire.CustomizedProperty
+import co.featbit.client.wire.EndUser
+
 /**
  * Defines the attributes of a user for whom feature flags are evaluated.
  *
@@ -21,11 +24,23 @@ public class FBUser internal constructor(
     public val name: String,
     public val custom: Map<String, String>,
 ) {
-    internal fun toEndUser(): EndUser = EndUser(
+    // FBUser is immutable, so its wire representation is too. Building it once at construction
+    // (rather than per evaluation insight) eliminates a per-flag-check allocation of EndUser +
+    // CustomizedProperty list + the singleton-list wrapper + N CustomizedProperty entries for
+    // an N-custom-attribute user (so ~4 objects per evaluation just for the wire form).
+    //
+    // The list is wrapped in `unmodifiableList` so SDK-internal code can't `as MutableList`
+    // and corrupt the cached payload — this cache is per-FBUser-lifetime; in-place mutation
+    // would silently break every subsequent insight + polling request for that user.
+    private val endUser: EndUser = EndUser(
         keyId = key,
         name = name,
-        customizedProperties = custom.map { (k, v) -> CustomizedProperty(k, v) },
+        customizedProperties = java.util.Collections.unmodifiableList(
+            custom.map { (k, v) -> CustomizedProperty(k, v) },
+        ),
     )
+
+    internal fun toEndUser(): EndUser = endUser
 
     /** Fluent builder for [FBUser]. */
     public class Builder(private val key: String) {

@@ -28,6 +28,18 @@ android {
 
     kotlinOptions {
         jvmTarget = "11"
+        // Module-wide mode for default-method binary compat on public interfaces. Emits
+        // default-method bodies into the interface bytecode (real Java 8 defaults) AND keeps
+        // a `DefaultImpls` synthetic class as a fallback for legacy binaries compiled against
+        // earlier versions of the interface. Applies to every interface in this module — no
+        // per-interface `@JvmDefaultWithCompatibility` annotation needed (that annotation
+        // only matters under `-Xjvm-default=all`).
+        //
+        // Required for `MemoryStore.upsertAll`: gaining a new default method on a `public`
+        // interface would otherwise either source-break Java implementers (forcing them to
+        // override) or `AbstractMethodError` old binary implementers when the SDK calls the
+        // method.
+        freeCompilerArgs = freeCompilerArgs + "-Xjvm-default=all-compatibility"
     }
 
     testOptions {
