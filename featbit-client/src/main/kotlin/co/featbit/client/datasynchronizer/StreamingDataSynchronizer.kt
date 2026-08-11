@@ -1,5 +1,6 @@
 package co.featbit.client.datasynchronizer
 
+import co.featbit.client.FBEvent
 import co.featbit.client.internal.ConnectionToken
 import co.featbit.client.model.EndUser
 import co.featbit.client.model.FBUser
@@ -43,6 +44,7 @@ internal class StreamingDataSynchronizer(
     options: FBOptions,
     private val user: FBUser,
     private val store: MemoryStore,
+    private val emitEvent: (FBEvent) -> Unit = {},
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .pingInterval(20, TimeUnit.SECONDS)
@@ -105,10 +107,14 @@ internal class StreamingDataSynchronizer(
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            if (code != NORMAL_CLOSURE) scheduleReconnect("closed: $code $reason")
+            if (code != NORMAL_CLOSURE) {
+                emitEvent(FBEvent.TransportError(RuntimeException("websocket closed: $code $reason")))
+                scheduleReconnect("closed: $code $reason")
+            }
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            emitEvent(FBEvent.TransportError(t))
             scheduleReconnect(t.message ?: "connection failure")
         }
     }
@@ -136,17 +142,42 @@ internal class StreamingDataSynchronizer(
             val envelope = StreamingJson.decodeFromString(ServerEnvelope.serializer(), text)
             if (envelope.messageType != "data-sync" || envelope.data == null) return
 
-            val payload = StreamingJson.decodeFromJsonElement(DataSyncPayload.serializer(), envelope.data)
-            payload.featureFlags.forEach(store::upsert)
+            val payload = decodePayloadIsolated(envelope.data) ?: return
+
+            // Per-flag isolation: one malformed entry cannot poison the whole batch. Upsert
+            // survives; the bad entry is dropped after being logged + surfaced via FBEvent.
+            payload.featureFlags.forEach { flag ->
+                try {
+                    store.upsert(flag)
+                } catch (ex: Exception) {
+                    logger.warn("Skipping malformed flag entry from streaming payload: ${ex.javaClass.simpleName}: ${ex.message}")
+                    emitEvent(FBEvent.SyncError(ex, recoverable = true))
+                }
+            }
             timestamp = System.currentTimeMillis()
 
             if (initializedFlag.compareAndSet(false, true)) {
                 startTask.complete(true)
                 logger.info("Streaming data synchronizer initialized for user ${user.key}.")
+                emitEvent(FBEvent.Ready)
             }
         } catch (ex: Exception) {
             logger.error("Failed to handle streaming message.", ex)
+            emitEvent(FBEvent.SyncError(ex, recoverable = initializedFlag.get()))
         }
+    }
+
+    /**
+     * Isolate payload decoding so a single bad flag entry does not abort the entire batch.
+     * `coerceInputValues = true` on [StreamingJson] already coerces null-on-non-null fields
+     * to their defaults; this catch is the belt-and-braces for anything the coercion misses.
+     */
+    private fun decodePayloadIsolated(data: JsonElement): DataSyncPayload? = try {
+        StreamingJson.decodeFromJsonElement(DataSyncPayload.serializer(), data)
+    } catch (ex: Exception) {
+        logger.error("Failed to decode data-sync payload.", ex)
+        emitEvent(FBEvent.SyncError(ex, recoverable = initializedFlag.get()))
+        null
     }
 
     override fun pause() {
@@ -175,6 +206,7 @@ internal class StreamingDataSynchronizer(
         val attempt = ++reconnectAttempts
         val backoff = min(MAX_BACKOFF_MS, BASE_BACKOFF_MS shl min(attempt, 6)) + Random.nextLong(250)
         logger.warn("Streaming disconnected ($reason); reconnecting in ${backoff}ms (attempt $attempt).")
+        emitEvent(FBEvent.Reconnecting)
         scope.launch {
             delay(backoff)
             reconnecting.set(false)
@@ -214,7 +246,15 @@ internal class StreamingDataSynchronizer(
         const val MAX_BACKOFF_MS = 30_000L
         const val PING_MESSAGE = """{"messageType":"ping","data":{}}"""
 
-        val StreamingJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+        // coerceInputValues: server occasionally ships `"variation": null` for json-typed
+        // flags with an unset variation slot; without coercion the whole streaming payload
+        // fails to decode and FBClient never becomes ready. Coerce null → property default
+        // (empty string) for the defaulted non-null string fields on FeatureFlag.
+        val StreamingJson = Json {
+            ignoreUnknownKeys = true
+            encodeDefaults = true
+            coerceInputValues = true
+        }
 
         /** Accepts `ws(s)://` (or `http(s)://`) and returns the `/streaming` HTTP(S) URL OkHttp uses. */
         fun String.toStreamingHttpUrl() =

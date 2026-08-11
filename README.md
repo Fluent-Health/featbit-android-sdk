@@ -213,6 +213,47 @@ client.flagTracker.subscribe("game-runner") { e -> /* ... */ }
 // unsubscribe with the same listener reference
 ```
 
+### Observing SDK health
+
+`FBClient.events()` returns a hot `Flow<FBEvent>` carrying lifecycle + health signals so an
+application can surface transport / decode failures to its own observability stack (Sentry,
+Timber, structured logs) — the SDK itself never captures third-party observability.
+
+```kotlin
+// e.g. in Application.onCreate() alongside the FBLifecycleConnector wiring
+appScope.launch {
+    client.events().collect { event ->
+        when (event) {
+            FBEvent.Ready -> Timber.d("FeatBit ready.")
+            FBEvent.Reconnecting -> Timber.d("FeatBit reconnecting.")
+            is FBEvent.SyncError -> if (event.recoverable) {
+                Timber.w(event.cause, "FeatBit sync error (recoverable).")
+            } else {
+                Timber.e(event.cause, "FeatBit sync failed.")
+                Sentry.captureException(event.cause)
+            }
+            is FBEvent.TransportError -> Timber.w(event.cause, "FeatBit transport error.")
+        }
+    }
+}
+```
+
+`SyncError` carries a `recoverable: Boolean`. It's `true` when the sync layer skipped a
+single malformed flag entry within an otherwise-valid batch or when the client is already
+initialised and the failure only affects the current batch; `false` when the very first
+initialisation failed and evaluations are still returning caller defaults. Subscribe
+**before** `start()` to observe the initial `Ready` emission.
+
+### Resilience to malformed server payloads
+
+`StreamingJson` uses `coerceInputValues = true`, and both the streaming and polling paths
+apply per-flag `try/catch` isolation around `store.upsert`. If the server ever ships a
+malformed variation for one flag entry (e.g. a `null` on a non-null string field, which we
+have observed for json-typed flags with an unset variation slot), the SDK logs the failure,
+emits `FBEvent.SyncError(recoverable = true)`, drops that entry, and continues processing
+the rest of the batch — instead of aborting the whole payload and leaving the client stuck
+in a not-ready state.
+
 ### Offline mode & bootstrapping
 
 ```kotlin

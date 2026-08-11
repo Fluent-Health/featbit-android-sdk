@@ -4,6 +4,7 @@ import co.featbit.client.changetracker.FlagTracker
 import co.featbit.client.evaluation.EvalDetail
 import co.featbit.client.model.FBUser
 import co.featbit.client.model.FeatureFlag
+import kotlinx.coroutines.flow.Flow
 import java.io.Closeable
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -21,6 +22,14 @@ public interface FBClient : Closeable {
 
     /** The tracker used to subscribe to feature flag changes. */
     public val flagTracker: FlagTracker
+
+    /**
+     * Hot flow of SDK lifecycle + health events. Applications subscribe to surface transport /
+     * decode failures to their own observability stack (Sentry breadcrumb, Timber log). See
+     * [FBEvent] for the event catalogue. Subscribe before [start] to observe the initial
+     * [FBEvent.Ready] emission; late subscribers observe subsequent events only.
+     */
+    public fun events(): Flow<FBEvent>
 
     /**
      * Starts the client and suspends until it is ready or [timeout] elapses.
