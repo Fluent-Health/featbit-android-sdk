@@ -25,6 +25,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.time.Duration
@@ -54,6 +58,16 @@ public class FBClientImpl(
         },
     )
 
+    // Hot event bus for SDK lifecycle + health signals. extraBufferCapacity + DROP_OLDEST so a
+    // slow subscriber cannot back-pressure the sync layer; a burst of errors during reconnect
+    // storms is expected and coalescing to the latest is the desired behaviour.
+    private val eventBus = MutableSharedFlow<FBEvent>(
+        replay = 0,
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    private val emitEvent: (FBEvent) -> Unit = { eventBus.tryEmit(it) }
+
     @Volatile
     private var user: FBUser = initialUser
 
@@ -67,12 +81,14 @@ public class FBClientImpl(
 
     override val flagTracker: FlagTracker get() = flagTrackerImpl
 
+    override fun events(): Flow<FBEvent> = eventBus.asSharedFlow()
+
     private fun newDataSynchronizer(forUser: FBUser): DataSynchronizer = when {
         options.offline -> NullDataSynchronizer()
         options.dataSyncMode == DataSyncMode.Streaming ->
-            StreamingDataSynchronizer(options, forUser, store)
+            StreamingDataSynchronizer(options, forUser, store, emitEvent)
         options.dataSyncMode == DataSyncMode.Polling ->
-            PollingDataSynchronizer(options, forUser, store)
+            PollingDataSynchronizer(options, forUser, store, emitEvent)
         else -> NullDataSynchronizer()
     }
 

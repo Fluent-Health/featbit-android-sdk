@@ -78,6 +78,7 @@ internal abstract class FbApiClient(
             ignoreUnknownKeys = true
             encodeDefaults = true
             explicitNulls = false
+            coerceInputValues = true
         }
     }
 }

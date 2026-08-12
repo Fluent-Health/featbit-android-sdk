@@ -1,5 +1,6 @@
 package co.featbit.client.datasynchronizer
 
+import co.featbit.client.FBEvent
 import co.featbit.client.internal.GetUserFlags
 import co.featbit.client.model.FBUser
 import co.featbit.client.options.FBOptions
@@ -25,6 +26,7 @@ internal class PollingDataSynchronizer(
     options: FBOptions,
     user: FBUser,
     private val store: MemoryStore,
+    private val emitEvent: (FBEvent) -> Unit = {},
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val getUserFlags: GetUserFlags = GetUserFlags(options, user),
 ) : DataSynchronizer {
@@ -68,6 +70,7 @@ internal class PollingDataSynchronizer(
                 logger.error(
                     "Polling data synchronizer encountered fatal HTTP error ${response.statusCode}. Stop polling...",
                 )
+                emitEvent(FBEvent.TransportError(RuntimeException("polling fatal HTTP ${response.statusCode}")))
                 startTask.complete(false)
                 close()
                 return
@@ -75,22 +78,33 @@ internal class PollingDataSynchronizer(
 
             if (response.isError) {
                 logger.warn("Polling data synchronizer encountered transient HTTP error ${response.statusCode}.")
+                emitEvent(FBEvent.TransportError(RuntimeException("polling transient HTTP ${response.statusCode}")))
                 return
             }
 
             timestamp = System.currentTimeMillis()
             logger.debug { "Polling received ${response.flags.size} flags." }
 
-            response.flags.forEach { store.upsert(it) }
+            // Per-flag isolation: skip malformed entries rather than aborting the whole batch.
+            response.flags.forEach { flag ->
+                try {
+                    store.upsert(flag)
+                } catch (ex: Exception) {
+                    logger.warn("Skipping malformed flag entry from polling response: ${ex.javaClass.simpleName}: ${ex.message}")
+                    emitEvent(FBEvent.SyncError(ex, recoverable = true))
+                }
+            }
 
             if (initializedFlag.compareAndSet(false, true)) {
                 startTask.complete(true)
                 logger.info("Polling data synchronizer initialized for user $userKey.")
+                emitEvent(FBEvent.Ready)
             }
         } catch (ex: CancellationException) {
             throw ex
         } catch (ex: Exception) {
             logger.error("Exception occurred while polling data.", ex)
+            emitEvent(FBEvent.SyncError(ex, recoverable = initializedFlag.get()))
         }
     }
 
