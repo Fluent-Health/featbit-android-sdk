@@ -2,6 +2,7 @@ apiVersion: backstage.io/v1alpha1
 kind: Component
 metadata:
   name: featbit-android-sdk
+  title: FeatBit Android SDK
   description: FeatBit client-side feature-flag SDK for Kotlin/Android (based on FeatBit's .NET client SDK)
   annotations:
     github.com/project-slug: Fluent-Health/featbit-android-sdk
